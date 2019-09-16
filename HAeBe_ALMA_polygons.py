@@ -77,9 +77,8 @@ def define_surface(data):
     class Window_Interface():
 
         def __init__(self,data):
-            self.fig, self.ax = plt.subplots()
-            plt.subplots_adjust(bottom=0.2)
-
+            self.fig  =plt.gcf()
+            self.ax = plt.gca()
             self.im = data
             self.ind = 0
             self.angle = 0.
@@ -134,12 +133,14 @@ def define_surface(data):
 
 
     class Polygon_Builder:
-        def __init__(self):
+        def __init__(self,fig,ax):
             self.x = []
             self.y = []
             self.npoints = 0
-            self.fig = plt.gcf()
-            self.ax = plt.gca()
+            self.fig = fig
+            self.ax = ax
+
+        def connect(self):
             self.cid = self.fig.canvas.mpl_connect('button_press_event', self)
 
         def __call__(self,event):
@@ -148,7 +149,9 @@ def define_surface(data):
             print('%s click: button=%d, x=%d, y=%d, xdata=%f, ydata=%f' %
                   ('double' if event.dblclick else 'single', event.button,
                    event.x, event.y, event.xdata, event.ydata))
-            if event.inaxes!=self.line.axes: return
+            if event.inaxes != self.ax:
+                print("OUT !!!!!!!!!") # Ok, we do not anything if we are in the right axis
+                return
 
             if event.button == 1: # Adding points
                 self.npoints += 1
@@ -172,14 +175,20 @@ def define_surface(data):
 
 
         def delete_point(self):
-            pass
+           pass
+
+    def create_polygon():
+        polygon = Polygon_Builder(fig,ax)
+        polygon.connect()
 
     # -- We define on the window interface on the data
+    fig, ax = plt.subplots()
+    plt.subplots_adjust(bottom=0.2)
     callback = Window_Interface(data)
 
     # -- We add the interface buttons
 
-    #-- Velocity button
+    #-- Velocity buttons
     axnext = plt.axes([0.81, 0.03, 0.1, 0.05])
     bnext = Button(axnext, 'Next')
     bnext.on_clicked(callback.next)
@@ -216,4 +225,19 @@ def define_surface(data):
     #-- Polygon button
     poly = plt.axes([0.4, 0.075, 0.2, 0.05])
     b_poly = Button(poly, "define surface")
-    b_poly.on_clicked(polygon = Polygon_Builder())
+    b_poly.on_clicked(create_polygon())
+
+    # Creating dummy references to make buttons available
+    buttonaxe._bnext = bnext
+    buttonaxe._bprev = bprev
+    buttonaxe._bnext10 = bnext10
+    buttonaxe._bprev10 = bprev10
+
+    buttonaxe._brotp = brotp
+    buttonaxe._brotm = brotm
+    buttonaxe._brotp10 = brotp10
+    buttonaxe._brotm10 = brotm10
+
+    buttonaxe._bpoly = b_poly
+
+    plt.sca(ax)
