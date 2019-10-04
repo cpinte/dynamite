@@ -116,6 +116,10 @@ def define_surface(data):
             self.angle -= 1
             self._plot_channel()
 
+        def create_polygon(self, event):
+            polygon = Polygon_Builder(fig,ax)
+            self._connect_mouse()
+
         def _plot_channel(self,first_time=False):
             print(self.ind)
             plt.sca(self.ax)
@@ -130,20 +134,13 @@ def define_surface(data):
             plt.text(0.0,1.05, f"Current channel: {self.ind}",transform=self.ax.transAxes)
             plt.text(0.5,1.05, f"Current rot: {self.angle}",transform=self.ax.transAxes)
             plt.draw()
+            print("CHANNEL PLOT DONE")
 
+        def _connect_mouse(self):
+            print("Connecting button")
+            self.cid = self.fig.canvas.mpl_connect('button_press_event', self._button_press)
 
-    class Polygon_Builder:
-        def __init__(self,fig,ax):
-            self.x = []
-            self.y = []
-            self.npoints = 0
-            self.fig = fig
-            self.ax = ax
-
-        def connect(self):
-            self.cid = self.fig.canvas.mpl_connect('button_press_event', self)
-
-        def __call__(self,event):
+        def _button_press(self,event):
             print("")
             print('click', event)
             print('%s click: button=%d, x=%d, y=%d, xdata=%f, ydata=%f' %
@@ -174,17 +171,30 @@ def define_surface(data):
                     d2 = (np.array(self.x)-x)**2 + (np.array(self.y)-y)**2
 
 
+    class Polygon:
+        def __init__(self):
+            self.x = []
+            self.y = []
+            self.npoints = 0
+
+        def add_point(self):
+
+
         def delete_point(self):
            pass
 
-    def create_polygon():
-        polygon = Polygon_Builder(fig,ax)
-        polygon.connect()
+    print("BIBI is confused")
+
+
+
+    print("BIBI is still confused")
+
 
     # -- We define on the window interface on the data
     fig, ax = plt.subplots()
     plt.subplots_adjust(bottom=0.2)
     callback = Window_Interface(data)
+    print("WE ARE HERE")
 
     # -- We add the interface buttons
 
@@ -192,52 +202,48 @@ def define_surface(data):
     axnext = plt.axes([0.81, 0.03, 0.1, 0.05])
     bnext = Button(axnext, 'Next')
     bnext.on_clicked(callback.next)
+    axnext._bnext = bnext # Creating dummy references to make buttons available
 
     axprev = plt.axes([0.7, 0.03, 0.1, 0.05])
     bprev = Button(axprev, 'Previous')
     bprev.on_clicked(callback.prev)
+    axprev._bprev = bprev
 
     axnext10 = plt.axes([0.81, 0.09, 0.1, 0.05])
     bnext10 = Button(axnext10, '+ 10')
     bnext10.on_clicked(callback.next10)
+    axnext10._bnext10 = bnext10
 
     axprev10 = plt.axes([0.7, 0.09, 0.1, 0.05])
     bprev10 = Button(axprev10, '- 10')
     bprev10.on_clicked(callback.prev10)
+    axprev10._bprev10 = bprev10
 
     #-- Rotation buttons
     axrotp = plt.axes([0.1, 0.03, 0.1, 0.05])
     brotp = Button(axrotp, '+1$^o$')
     brotp.on_clicked(callback.rotate_plus)
+    axrotp._brotp = brotp
 
     axrotm = plt.axes([0.21, 0.03, 0.1, 0.05])
     brotm = Button(axrotm, '-1$^o$')
     brotm.on_clicked(callback.rotate_moins)
+    axrotm._brotm = brotm
 
     axrotp10 = plt.axes([0.1, 0.09, 0.1, 0.05])
     brotp10 = Button(axrotp10, '+10$^o$')
     brotp10.on_clicked(callback.rotate_plus10)
+    axrotp10._brotp10 = brotp10
 
     axrotm10 = plt.axes([0.21, 0.09, 0.1, 0.05])
     brotm10 = Button(axrotm10, '-10$^o$')
     brotm10.on_clicked(callback.rotate_moins10)
+    axrotm10._brotm10 = brotm10
 
     #-- Polygon button
-    poly = plt.axes([0.4, 0.075, 0.2, 0.05])
-    b_poly = Button(poly, "define surface")
-    b_poly.on_clicked(create_polygon())
-
-    # Creating dummy references to make buttons available
-    buttonaxe._bnext = bnext
-    buttonaxe._bprev = bprev
-    buttonaxe._bnext10 = bnext10
-    buttonaxe._bprev10 = bprev10
-
-    buttonaxe._brotp = brotp
-    buttonaxe._brotm = brotm
-    buttonaxe._brotp10 = brotp10
-    buttonaxe._brotm10 = brotm10
-
-    buttonaxe._bpoly = b_poly
+    axpoly = plt.axes([0.4, 0.075, 0.2, 0.05])
+    b_poly = Button(axpoly, "define surface")
+    b_poly.on_clicked(callback.create_polygon)
+    axpoly._bpoly = b_poly
 
     plt.sca(ax)
