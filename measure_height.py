@@ -8,6 +8,7 @@ import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
 from scipy.stats import binned_statistic
 
+import matplotlib.pyplot as plt
 
 
 def measure_mol_surface(cube, n, x, y, T, inc=None, x_star=None, y_star=None, v_syst= None, plot=None, distance=None, optimize_x_star=None):
@@ -26,9 +27,11 @@ def measure_mol_surface(cube, n, x, y, T, inc=None, x_star=None, y_star=None, v_
     h = y_c / np.sin(inc_rad)
     v = (cube.velocity[:,np.newaxis] - v_syst) * r / ((x - x_star) * np.sin(inc_rad)) # does not depend on y_star
 
+    r *= cube.pixelscale
+    h *= cube.pixelscale
     if distance is not None:
-        r *= cube.pixelscale * distance
-        h *= cube.pixelscale * distance
+        r *= distance
+        h *= distance
 
     # value of x_star plays on dispersion of h and v
     # value of PA creates a huge dispersion
@@ -64,6 +67,7 @@ def measure_mol_surface(cube, n, x, y, T, inc=None, x_star=None, y_star=None, v_
     plt.show()
 
     #-- Ignoring channels close to systemic velocity
+    # change of mind : we do it later
 
     #-- fitting a power-law
     P, res_h, _, _, _ = np.ma.polyfit(np.log10(r.ravel()),np.log10(h.ravel()),1, full=True)
@@ -97,6 +101,55 @@ def measure_mol_surface(cube, n, x, y, T, inc=None, x_star=None, y_star=None, v_
 
 
 
+class Surface(dict):
+    """ Represents the set of points defining the molecular surface
+    extracted from a cube
+
+    n : int
+        Number of abscices where data points were extracted
+
+    x : int
+        Abcises of the points
+
+    y : ndarray(float,2)
+        Ordinates of the points
+
+    T : ndarray(float,2)
+        Brigtness temperature of the points
+
+    PA : best PA found
+
+    Notes
+    -----
+    There may be additional attributes not listed above depending of the
+    specific solver. Since this class is essentially a subclass of dict
+    with attribute accessors, one can see which attributes are available
+    using the `keys()` method.
+    """
+
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError:
+            raise AttributeError(name)
+
+    __setattr__ = dict.__setitem__
+    __delattr__ = dict.__delitem__
+
+    def __repr__(self):
+        if self.keys():
+            m = max(map(len, list(self.keys()))) + 1
+            return '\n'.join([k.rjust(m) + ': ' + repr(v)
+                              for k, v in sorted(self.items())])
+        else:
+            return self.__class__.__name__ + "()"
+
+    def __dir__(self):
+        return list(self.keys())
+
+
+
+
 def detect_surface(cube, PA=None, plot=False, plot_cut=None, sigma=None, y_star=None, win=20):
     """
     Infer the upper emission surface from the provided cube
@@ -122,7 +175,6 @@ def detect_surface(cube, PA=None, plot=False, plot_cut=None, sigma=None, y_star=
     std = np.nanstd(cube.image[1,:,:])
 
     surface_color = ["red","blue"]
-
 
     for iv in range(nv):
         print(iv,"/",nv-1)
