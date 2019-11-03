@@ -5,10 +5,8 @@ from astropy import units as u
 
 class toy_model:
 
-    Msun = u.Msun.to(u.kg)
-
-    def __init__(self, Mstar=None,  dist=None, inc=None, PA=None, FOV=None, z_func=None, npix=None, cube=None, vlsr=0.
-                 , r0=None, z0=None, beta=None):
+    def __init__(self, Mstar=None, dist=None, inc=None, PA=None, FOV=None npix=None, cube=None, vlsr=0.,
+                 z_func=None, r0=None, z0=None, beta=None, lower_surface=False):
 
         # Testing all the arguments
         if z_func is None:
@@ -35,8 +33,7 @@ class toy_model:
         self.PA = PA
 
         if cube is not None:
-            FOV = cube.FOV
-            npix = cube.nx
+            FOV, npix = cube.FOV, cube.nx
             self.velocity = cube.velocity
 
         if FOV is None:
@@ -53,12 +50,11 @@ class toy_model:
 
         self.extent = [self.FOV/2,-self.FOV/2,-self.FOV/2,self.FOV/2]
 
-
         # Sky coordinates
         self.x_sky, self.y_sky = np.meshgrid(self.xaxis, self.yaxis)
 
         # Model coordinates in arcsec
-        self.x_disk, self.y_disk, self.z_disk = self.sky_to_surface(inc=inc, PA=PA, z_func=z_func)
+        self.x_disk, self.y_disk, self.z_disk = self.sky_to_surface(inc=inc, PA=PA, z_func=z_func, lower_surface=lower_surface)
 
         # Model coordinates in au
         self.x_disk *= dist
@@ -82,12 +78,14 @@ class toy_model:
             z (Optional[array]): Height of emission surface in [au].
         """
 
+        Msun = u.Msun.to(u.kg)
+
         if Mstar is None:
             raise ValueError("'Mstar' must be provided.")
         if r is None:
             raise ValueError("'r' must be provided.")
 
-        return  np.sqrt(sc.G * Mstar * self.Msun * (r**2 / np.hypot(r,z)**3) / sc.au)
+        return  np.sqrt(sc.G * Mstar * Msun * (r**2 / np.hypot(r,z)**3) / sc.au)
 
     def sky_to_midplane(self, x_sky=None, y_sky=None, inc=None, PA=None):
         """Return the coordinates (x,y) of the midplane in arcsec"""
@@ -101,11 +99,15 @@ class toy_model:
         #-- Deproject for inclination
         return x_rot, y_rot / np.cos(np.radians(inc))
 
-    def sky_to_surface(self, inc=None, PA=None, z_func=None):
+    def sky_to_surface(self, inc=None, PA=None, z_func=None, lower_surface=False):
         """Return coordinates (x,y,z) of surface in arcsec"""
 
         n_iter = 20
         tan_i = np.tan(np.radians(inc))
+        if lower_surface:
+            z_factor = -1
+        else:
+            z_factor = 1
 
         x_mid, y_mid = self.sky_to_midplane(x_sky=self.x_sky, y_sky=self.y_sky, inc=inc, PA=PA)
         x_mid2 = x_mid**2
@@ -116,20 +118,34 @@ class toy_model:
         x, y = x_mid, y_mid
         for i in range(n_iter):
             r = np.sqrt(x_mid2 + y**2)
-            z = z_func(r) #+ w_func(r, np.arctan2(y, x))
+            z = z_factor * z_func(r) #+ w_func(r, np.arctan2(y, x))
             y = y_mid + z * tan_i
 
         return x, y, z
 
-    def plot_isovelocity_curve(self, v=None, channel=None, ax=None, **kwargs):
-
-        if v is None:
-            v = self.velocity[channel]
+    def plot_isovelocity_curve(self, v=None, channel=None, ax=None,
+                               rmin=None, rmax=None, nearside_only=False, farside_only=False,
+                               correct_velocity=1.0,
+                               **kwargs):
 
         if ax is None:
             ax = plt.gca()
 
-        ax.contour(self.xaxis, self.yaxis, self.v_proj, [v], **kwargs)
+        if v is None:
+            v = self.velocity[channel]
+
+        #-- Selecting parts of the isovelocity curve
+        mask = 1
+        if rmin is not None:
+            mask = np.where(self.r_disk > rmin, 1.0, np.nan)
+        if rmax is not None:
+            mask = np.where(self.r_disk < rmax, mask, np.nan)
+        if nearside_only:
+            mask = np.where(self.y_disk > 0, mask, np.nan)
+        if farside_only:
+            mask = np.where(self.y_disk < 0, mask, np.nan)
+
+        return ax.contour(self.xaxis, self.yaxis, self.v_proj * mask, [v * correct_velocity], **kwargs)
 
 #--- Old yorick routine translated to python (yorick routine was used for HD163296 paper)
 def yorick_toy_model(Mstar, inc, psi, nx=1000, ny=1000, xmax=1000, ymax=1000):
