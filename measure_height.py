@@ -45,12 +45,9 @@ def measure_mol_surface(cube, n, x, y, T, inc=None, x_star=None, y_star=None, v_
     # -- we remove channels that are too close to the systemic velocity
     mask = mask | (np.abs(cube.velocity - v_syst) < 1.5)[:,np.newaxis]
 
-    print(r.shape, mask.shape)
-
     r = np.ma.masked_array(r,mask)
     h = np.ma.masked_array(h,mask)
     v = np.ma.masked_array(v,mask)
-
 
     # -- If the disc rotates in the opposite direction as expected
     if (np.mean(v) < 0):
@@ -74,8 +71,6 @@ def measure_mol_surface(cube, n, x, y, T, inc=None, x_star=None, y_star=None, v_
     x = np.linspace(np.min(r),np.max(r),100)
     plt.figure(30)
     plt.plot(x, 10**P[1] * x**P[0])
-    print(P, "res", res_h)
-
 
     r_data = r.ravel()[np.invert(mask.ravel())]
     h_data = h.ravel()[np.invert(mask.ravel())]
@@ -148,8 +143,6 @@ class Surface(dict):
         return list(self.keys())
 
 
-
-
 def detect_surface(cube, PA=None, plot=False, plot_cut=None, sigma=None, y_star=None, win=20):
     """
     Infer the upper emission surface from the provided cube
@@ -163,8 +156,7 @@ def detect_surface(cube, PA=None, plot=False, plot_cut=None, sigma=None, y_star=
         without y_star, more points might be rejected
     """
 
-    nv = cube.nv
-    nx = cube.nx
+    nx, nv = cube.nx, cube.nv
 
     n_surf = np.zeros(nv, dtype=int)
     x_surf = np.zeros([nv,nx])
@@ -283,7 +275,7 @@ def detect_surface(cube, PA=None, plot=False, plot_cut=None, sigma=None, y_star=
             P = np.polyfit(x1,y1,1)
 
             #in_surface = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) # test only front surface
-            in_surface = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) & (j_surf_exact[:,1] > (P[1] + P[0]*x))
+            in_surface = in_surface & (j_surf_exact[:,0] < (P[1] + P[0]*x)) & (j_surf_exact[:,1] > (P[1] + P[0]*x))
 
             # Saving the data
             n = np.sum(in_surface)

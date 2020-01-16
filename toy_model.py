@@ -5,7 +5,7 @@ from astropy import units as u
 
 class toy_model:
 
-    def __init__(self, Mstar=None, dist=None, inc=None, PA=None, FOV=None npix=None, cube=None, vlsr=0.,
+    def __init__(self, Mstar=None, dist=None, inc=None, PA=None, FOV=None, npix=None, cube=None, vlsr=0.,
                  z_func=None, r0=None, z0=None, beta=None, lower_surface=False):
 
         # Testing all the arguments
@@ -125,7 +125,7 @@ class toy_model:
 
     def plot_isovelocity_curve(self, v=None, channel=None, ax=None,
                                rmin=None, rmax=None, nearside_only=False, farside_only=False,
-                               correct_velocity=1.0,
+                               correct_velocity=1.0, linestyles="-", flip_v=False,
                                **kwargs):
 
         if ax is None:
@@ -145,7 +145,10 @@ class toy_model:
         if farside_only:
             mask = np.where(self.y_disk < 0, mask, np.nan)
 
-        return ax.contour(self.xaxis, self.yaxis, self.v_proj * mask, [v * correct_velocity], **kwargs)
+        if flip_v:
+            correct_velocity *= -1
+
+        return ax.contour(self.xaxis, self.yaxis, self.v_proj * mask, [v * correct_velocity], linestyles=linestyles, **kwargs)
 
 #--- Old yorick routine translated to python (yorick routine was used for HD163296 paper)
 def yorick_toy_model(Mstar, inc, psi, nx=1000, ny=1000, xmax=1000, ymax=1000):
