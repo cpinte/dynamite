@@ -53,12 +53,12 @@ def measure_mol_surface(cube, n, x, y, T, inc=None, x_star=None, y_star=None, v_
     if (np.mean(v) < 0):
         v = -v
 
-    plt.figure(30)
+    plt.figure('height')
     plt.clf()
     plt.scatter(r.ravel(),h.ravel(),alpha=0.2,s=5)
     plt.show()
 
-    plt.figure(31)
+    plt.figure('velocity')
     plt.clf()
     plt.scatter(r.ravel(),v.ravel(),alpha=0.2,s=5)
     plt.show()
@@ -69,7 +69,7 @@ def measure_mol_surface(cube, n, x, y, T, inc=None, x_star=None, y_star=None, v_
     #-- fitting a power-law
     P, res_h, _, _, _ = np.ma.polyfit(np.log10(r.ravel()),np.log10(h.ravel()),1, full=True)
     x = np.linspace(np.min(r),np.max(r),100)
-    plt.figure(30)
+    plt.figure('height')
     plt.plot(x, 10**P[1] * x**P[0])
 
     r_data = r.ravel()[np.invert(mask.ravel())]
@@ -88,7 +88,7 @@ def measure_mol_surface(cube, n, x, y, T, inc=None, x_star=None, y_star=None, v_
     std_v, _, _  = binned_statistic(r_data,v_data, 'std', bins=30)
 
     print("STD =", np.median(std_v))  # min seems a better estimate for x_star than std_h
-    plt.figure(31)
+    plt.figure('velocity')
     plt.errorbar(bins_v[0,:], bins_v[1,:], yerr=std_v, color="red", marker="o", fmt=' ', markersize=2)
 
     # -- Optimize position, inclination (is that posible without a model ?), PA (need to re-run detect surface)
@@ -168,6 +168,7 @@ def detect_surface(cube, PA=None, plot=False, plot_cut=None, sigma=None, y_star=
 
     surface_color = ["red","blue"]
 
+    # Loop over the channels
     for iv in range(nv):
         print(iv,"/",nv-1)
         # Rotate the image so major axis is aligned with x-axis.
@@ -177,17 +178,17 @@ def detect_surface(cube, PA=None, plot=False, plot_cut=None, sigma=None, y_star=
 
         # plot channel map as bakcground
         if plot:
-            pdf = PdfPages('CO_layers.pdf')
+            #pdf = PdfPages('CO_layers.pdf')
             plt.figure(win)
             plt.clf()
             plt.imshow(im, origin="lower")#, interpolation="bilinear")
 
-        #-- Loop over x pixel axis to find surface
+
+        # Loop over the pixels along the x-axis to find surface
         in_surface = np.full(nx,False)
         j_surf = np.zeros([nx,2], dtype=int)
         j_surf_exact = np.zeros([nx,2])
         T_surf = np.zeros([nx,2])
-
 
         for i in range(nx):
             # find the maxima in each vertical cut, at signal above X sigma
@@ -201,6 +202,7 @@ def detect_surface(cube, PA=None, plot=False, plot_cut=None, sigma=None, y_star=
                 # indices of the back and front side
                 j_surf[i,:] = np.sort(j_max[:2])
 
+                # exclude maxima that do not make sense
                 if y_star is not None:
                     if (j_surf[i,1] < y_star):
                         # Houston, we have a pb : the back side of the disk cannot appear below the star
@@ -226,7 +228,7 @@ def detect_surface(cube, PA=None, plot=False, plot_cut=None, sigma=None, y_star=
                         plt.plot(j_max[0],im[j_max[0],i],"o",color=color[0])
                         plt.plot(j_max[1],im[j_max[1],i],"o",color=color[1])
 
-                #-- We find a spatial quadratic to refine position of maxima(like bettermoment does in velocity)
+                #-- We find a spatial quadratic to refine position of maxima (like bettermoment does in velocity)
                 for k in range(2):
                     j = j_surf[i,k]
 
@@ -245,7 +247,7 @@ def detect_surface(cube, PA=None, plot=False, plot_cut=None, sigma=None, y_star=
 
                     # Saving the coordinates
                     j_surf_exact[i,k] = y_max
-                    T_surf[i,k] = f_max
+                    T_surf[i,k] = cube._Jybeam_to_Tb(f_max) # Converting to Tb (currently assuming the cube is in Jy/beam)
 
         #-- Now we try to clean out a bit the surfaces we have extracted
 
@@ -266,7 +268,7 @@ def detect_surface(cube, PA=None, plot=False, plot_cut=None, sigma=None, y_star=
             #x_plot = np.array([0,nx])
             #plt.plot(x_plot, P[1] + P[0]*x_plot)
 
-            in_surface_tmp = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) # test only front surface
+            #in_surface_tmp = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) # test only front surface
             in_surface_tmp = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) & (j_surf_exact[:,1] > (P[1] + P[0]*x))
 
             # We remove the weird point and reddo the fit again to ensure the slope we use is not too bad
@@ -296,15 +298,13 @@ def detect_surface(cube, PA=None, plot=False, plot_cut=None, sigma=None, y_star=
                     plt.xlim(np.min(x_surf) - 10*cube.bmaj/cube.pixelscale,np.max(x_surf) + 10*cube.bmaj/cube.pixelscale)
                     plt.ylim(np.min(y_surf) - 10*cube.bmaj/cube.pixelscale,np.max(y_surf) + 10*cube.bmaj/cube.pixelscale)
 
-                    pdf.savefig()
+                    plt.savefig('layers/channel_'+str(iv+1)+'.png')
                     plt.close()
 
             #-- test if we have points on both side of the star
             # - remove side with the less points
 
-
     #--  Additional spectral filtering to clean the data
-
     return n_surf, x_surf, y_surf, Tb_surf
 
     #measure_surface(HD163, 50, plot=True, PA=-45,plot_cut=534,sigma=10, y_star=478)
