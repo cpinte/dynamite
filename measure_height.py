@@ -48,6 +48,8 @@ def measure_mol_surface(cube, n, x, y, T, inc=None, x_star=None, y_star=None, v_
     r = np.ma.masked_array(r,mask)
     h = np.ma.masked_array(h,mask)
     v = np.ma.masked_array(v,mask)
+    T = np.ma.masked_array(T[:,:,0],mask)
+
 
     # -- If the disc rotates in the opposite direction as expected
     if (np.mean(v) < 0):
@@ -75,6 +77,7 @@ def measure_mol_surface(cube, n, x, y, T, inc=None, x_star=None, y_star=None, v_
     r_data = r.ravel()[np.invert(mask.ravel())]
     h_data = h.ravel()[np.invert(mask.ravel())]
     v_data = v.ravel()[np.invert(mask.ravel())]
+    T_data = T.ravel()[np.invert(mask.ravel())]
 
     #plt.scatter(r_data,h_data)
 
@@ -90,6 +93,13 @@ def measure_mol_surface(cube, n, x, y, T, inc=None, x_star=None, y_star=None, v_
     print("STD =", np.median(std_v))  # min seems a better estimate for x_star than std_h
     plt.figure('velocity')
     plt.errorbar(bins_v[0,:], bins_v[1,:], yerr=std_v, color="red", marker="o", fmt=' ', markersize=2)
+
+
+    bins_T, _, _ = binned_statistic(r_data,[r_data,T_data], bins=30)
+    std_T, _, _  = binned_statistic(r_data,T_data, 'std', bins=30)
+
+    plt.figure('Brightness temperature')
+    plt.errorbar(bins_T[0,:], bins_T[1,:], yerr=std_T, color="red", marker="o", fmt=' ', markersize=2)
 
     # -- Optimize position, inclination (is that posible without a model ?), PA (need to re-run detect surface)
     return r, h, v
@@ -287,7 +297,7 @@ def detect_surface(cube, PA=None, plot=False, plot_cut=None, sigma=None, y_star=
                 y_surf[iv,:n,:] = j_surf_exact[in_surface,:]
                 Tb_surf[iv,:n,:] = T_surf[in_surface,:]
 
-                # We plot  the detected points
+                # We plot the detected points
                 if plot:
                     plt.figure(win)
                     plt.plot(x_surf,y_surf[:,0],"o",color=surface_color[0],markersize=1)
