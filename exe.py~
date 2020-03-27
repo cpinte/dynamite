@@ -1,0 +1,67 @@
+import casa_cube as casa
+import measure_height
+from astropy.io import fits
+import matplotlib.pyplot as plt
+import numpy as np
+from scipy.ndimage import rotate
+#from termcolor import colored
+from colorama import Fore
+from colorama import Style
+
+# enter inclination (inc) and position angle (PA) in degrees.
+# PA is measured from the north (yaxis) to the axis of rotation of the disk.
+
+continuum = casa.Cube('continuum.fits')
+cont = np.nan_to_num(continuum.image[0,:,:])
+cont = np.array(rotate(cont, 145 - 90.0, reshape=False))
+result = np.where(cont == np.amax(cont))
+listofcordinates = list(zip(result[0], result[1]))
+for cord in listofcordinates:
+    print('coordinates of maximum in continuum image (y,x) = '+str(cord))
+'''
+plt.figure('continuum')
+plt.imshow(cont, origin='lower')
+plt.plot(cord[1],cord[0], '.', color='red')
+plt.show()
+'''
+y_star = cord[0]#134 
+x_star = cord[1]#120 
+inc = 48
+sigma = 5
+PA = 143
+
+plt.figure('brightness temperature')
+plt.clf()
+
+plt.figure('height')
+plt.clf()
+
+plt.figure('velocity')
+plt.clf()
+
+isotope = ['CO','13CO','C18O']
+
+for i in range(3):
+
+    source = casa.Cube(str(isotope[i])+'_line.fits')
+    print(f'{Fore.BLUE}running '+str(isotope[i])+' line{Style.RESET_ALL}!')
+
+    '''
+    n, x, y, T = measure_height.detect_surface(source, PA=PA, plot=False, sigma=sigma, y_star=y_star)
+    #n_surf, x_surf, y_surf, Tb_surf values returned from the detect_surface fuction.
+    #then there are passed into the next function below as n,x,y,T.
+
+    r, h, v, Tb = measure_height.measure_mol_surface(source, n, x, y, T, inc=inc, x_star=x_star, y_star=y_star, v_syst=4.5, distance=158.4)
+
+    measure_height.plotting_mol_surface(r, h, v, Tb)
+    
+    
+    nv = source.nv
+    for j in range(nv):
+        iv = j 
+        measure_height.plot_surface(source, n, x, y, T, iv, PA=PA, win=20)
+        plt.plot(x_star,y_star, '.', color='white')
+        plt.savefig('Layers/'+str(isotope[i])+'_channel_'+str(j)+'.png')
+    '''
+plt.show()
+

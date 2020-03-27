@@ -1,0 +1,28 @@
+import numpy as np
+
+x = [1,2]
+y = np.array([1,-1,3,5,4])
+z = 2.
+'''
+if (x[0] < 3 and x[1] <3) or (x[0] > -1 and x[1] > -1):
+    print(True)
+else:
+    print(False)
+
+print(x.size)
+'''
+'''
+j = y[:2]
+
+if (j[0] < z and j[1] < z):
+    j_max = y[np.where(y > z)]
+    if len(j_max) > 0:
+        j_new = j_max[0]
+    print(j_new)
+'''
+
+y1 = np.zeros([], dtype=int)
+
+y1 = y[np.where(y > 6)]
+print(y1)
+print(len(y1))
