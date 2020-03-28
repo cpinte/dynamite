@@ -2,6 +2,7 @@
 *.fits
 *.pdf
 *.py~
+test.py
 /DSHARP_Layers
 /Layers
 /backup copy

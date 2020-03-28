@@ -5,6 +5,7 @@ from scipy.interpolate import interp1d
 import scipy.constants as sc
 from scipy.stats import binned_statistic
 from astropy.io import fits
+from skimage.transform import resize
 
 ##############################################################################
 
@@ -18,101 +19,79 @@ def measure_mol_surface(cube, n, x, y, T, inc=None, x_star=None, y_star=None, v_
         # a = above , b = below
 
     np.set_printoptions(threshold=np.inf) 
-    
-    ### converting inclination from degrees to radians
-    inc_rad = np.radians(inc)
 
     ### computing the radius and height 
     y_a = y[:,:,1]                        # y[channel number, x value, y value above star]
     y_b = y[:,:,0]                        # y[channel number, x value, y value below star]
-    y_c = (y_a + y_b)/2.
+
+    y_c = (y_a + y_b) / 2.
+    mask = (y_c == 0)
+    y_centre = np.ma.masked_array(y_c,mask).compressed()
     
-    h = (y_c - y_star) / np.sin(inc_rad)
-    if len(np.where(h.ravel()<0)[0]) > 0.995*len(h.ravel()):
-        h = -h
-        r = np.sqrt((x - x_star)**2 + ((y_c - y_b)/np.cos(inc_rad))**2)
+    if (len(np.where(y_centre.ravel()<y_star)[0]) > 0.5*len(y_centre.ravel())):
+        print('upper layer below y_star')
+        h = -(y_c - y_star) / np.sin(inc)
+        r = np.sqrt((x - x_star)**2 + ((y_c - y_b)/np.cos(inc))**2)
     else:
-        r = np.sqrt((x - x_star)**2 + ((y_a - y_c)/np.cos(inc_rad))**2)
+        print('upper layer above y_star')
+        h = (y_c - y_star) / np.sin(inc)
+        r = np.sqrt((x - x_star)**2 + ((y_a - y_c)/np.cos(inc))**2)
     
-    v = (cube.velocity[:,np.newaxis] - v_syst) * r / ((x - x_star) * np.sin(inc_rad))
+    v = (cube.velocity[:,np.newaxis] - v_syst) * r / ((x - x_star) * np.sin(inc))
+
+    B = np.mean(T[:,:,:],axis=2)
     
     r *= cube.pixelscale
     h *= cube.pixelscale
     if distance is not None:
         r *= distance
         h *= distance
-    
-    ### masking
-    # masked values are stored as True
-    mask1 = (h<0) | np.isinf(v) | np.isnan(v) | (r>400)       
 
-    print('total number of points = '+str(len(r.ravel())))
-    
-    # counts the number of True values, since True = 1 and False = 0 
-    print('points removed by 1st mask: '+str(np.sum(mask1)))
-    
-    # removing channels close to the systemic velocity
-    mask2 = mask1 | (np.abs(cube.velocity - v_syst) < 0.4)[:,np.newaxis]
-    print('points removed by 2nd mask: '+str(np.sum(mask2) - np.sum(mask1)))
+    mask1 = np.isinf(v) | np.isnan(v)
+    print(f'no. of channels with invalid velocities removed = {np.sum(mask1)}')
+    mask2 = mask1 | (np.abs(cube.velocity[:,np.newaxis] - v_syst) < 0.4)
+    print(f'no. of points outside filter removed = {np.sum(mask2)-np.sum(mask1)}')
+    mask3 = mask2 | (h<0) | (r>400)
 
-    ### masking the arrays & removing the invalid (True) points
-    
-    r = np.ma.masked_array(r,mask2).compressed()
-    h = np.ma.masked_array(h,mask2).compressed()
-    v = np.ma.masked_array(v,mask2).compressed()
-    B = np.ma.masked_array(np.mean(T[:,:,:], axis=2),mask2).compressed()
-
-    ### masking for negative velocity and re-compressing arrays
-    # -- if the disc is rotating clockwise
-    if (np.mean(v) < 0):
-        v = -v
-        
-    mask3 = (v<0)
-    print('points removed by 3rd mask: '+str(np.sum(mask3)))
-    
     r = np.ma.masked_array(r,mask3).compressed()
     h = np.ma.masked_array(h,mask3).compressed()
     v = np.ma.masked_array(v,mask3).compressed()
     B = np.ma.masked_array(B,mask3).compressed()
+
+    if (np.mean(v) < 0):
+        v = -v
     
-    print('points left for plotting: '+str(len(r.ravel())))
+    mask4 = (v<0)
+    print(f'no. of outliers removed = {(np.sum(mask3)-np.sum(mask2))+np.sum(mask4)}')
     
-    ### computing brightness temperature
+    r = np.ma.masked_array(r,mask4).compressed()
+    h = np.ma.masked_array(h,mask4).compressed()
+    v = np.ma.masked_array(v,mask4).compressed()
+    B = np.ma.masked_array(B,mask4).compressed()
+    
     Tb = cube._Jybeam_to_Tb(B)
 
+    print(f'no. of plots left for plotting = {len(r.ravel())}')
+    
     return r, h, v, Tb
 
 
 
 def plotting_mol_surface(r, h, v, Tb, i, isotope):
 
-    ### binning data
-    h_bins,_,_ = binned_statistic(r, [r, h], statistic='mean', bins=70)
-    v_bins,_,_ = binned_statistic(r, [r, v], statistic='mean', bins=70)
-    Tb_bins,_,_ = binned_statistic(r, [r, Tb], statistic='max', bins=70)
+    bins = 70
+    plot = ['height', 'velocity', 'brightness temperature']
+    var = [h, v, Tb]
+    stat = ['mean', 'mean', 'max']
 
-    ### computing standard deviation 
-    h_std,_,_ = binned_statistic(r, h, statistic='std', bins=70)
-    v_std, _, _  = binned_statistic(r, v, statistic='std', bins=70)
-    Tb_std,_,_ = binned_statistic(r, Tb, statistic='std',bins=70)
+    for k in range(3):
+        plt.figure(plot[k])
 
-    ### printing mean of standard deviations
-    print("STD for height =", np.median(h_std))
-    print("STD for velocity =", np.median(v_std))
+        data,_,_ = binned_statistic(r, [r, var[k]], statistic=stat[k], bins=bins)
+        std,_,_ = binned_statistic(r, var[k], statistic='std', bins=bins)
 
-    ### plotting figures ###
-
-    plt.figure('height')  ####
-    plt.scatter(h_bins[0,:], h_bins[1,:], alpha=0.7, s=5, label=isotope[i])
-    plt.errorbar(h_bins[0,:], h_bins[1,:], yerr=h_std, ls='none')
-
-    plt.figure('velocity')   ####
-    plt.scatter(v_bins[0,:], v_bins[1,:], alpha=0.7, s=5, label=isotope[i])
-    plt.errorbar(v_bins[0,:], v_bins[1,:], yerr=v_std, ls='none')
-
-    plt.figure('brightness temperature')  ####
-    plt.scatter(Tb_bins[0,:], Tb_bins[1,:], alpha=0.7, s=5, label=isotope[i])
-    plt.errorbar(Tb_bins[0,:], Tb_bins[1,:], yerr=Tb_std, ls='none')
+        plt.scatter(data[0,:], data[1,:], alpha=0.7, s=5, label=isotope[i])
+        plt.errorbar(data[0,:], data[1,:], yerr=std, ls='none')
     
     ### polynomial fitting
     '''
@@ -363,3 +342,31 @@ def search_maxima(y, threshold=None, dx=0):
             i_max = i_max[~flag_remove]
 
     return i_max
+
+
+
+def star_location(source, continuum, PA=False, plot=False, name=False):
+
+    nx = source.nx
+    
+    continuum = np.nan_to_num(continuum.image[0,:,:])
+    continuum = resize(continuum, (nx,nx))
+    continuum = np.array(rotate(continuum, PA - 90.0, reshape=False))
+    star_coordinates = np.where(continuum == np.amax(continuum))
+    listofcordinates = list(zip(star_coordinates[0], star_coordinates[1]))
+   
+    for cord in listofcordinates:
+        print('coordinates of maximum in continuum image (y,x) = '+str(cord))
+
+    y_star = cord[0] 
+    x_star = cord[1]
+    
+    if plot is True:
+        plt.figure('continuum')
+        plt.clf()
+        plt.imshow(continuum, origin='lower')
+        plt.plot(cord[1],cord[0], '.', color='red')
+        plt.savefig(f'{name}_continuum.png')
+
+    return y_star, x_star
+    
