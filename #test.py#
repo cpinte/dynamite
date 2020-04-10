@@ -1,0 +1,8 @@
+import numpy as np
+
+y = []
+x = [1,2]
+a = a.append(x[0])
+#z = y+a
+print(a)
+

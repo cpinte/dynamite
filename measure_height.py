@@ -162,7 +162,7 @@ def detect_surface(cube, PA=None, plot=False, sigma=None, y_star=None, win=20):
     y_surf = np.zeros([nv,nx,2])
     Tb_surf = np.zeros([nv,nx,2])
 
-    surface_color = ["red","blue"]
+    surface_color = ["purple","pink"]
     
     ### measure rms in the 1st channel 
     std = np.nanstd(cube.image[1,:,:])
@@ -180,7 +180,7 @@ def detect_surface(cube, PA=None, plot=False, sigma=None, y_star=None, win=20):
         if PA is not None:
             im = np.array(rotate(im, PA - 90.0, reshape=False))
 
-        ### plotting rotated channel map
+        ### plotting rotated channel map (if needed)
         if plot is True:
             if iv==0:
                 img_rotated_list=[]
@@ -197,12 +197,12 @@ def detect_surface(cube, PA=None, plot=False, sigma=None, y_star=None, win=20):
         j_surf_exact = np.zeros([nx,2])
         T_surf = np.zeros([nx,2])
         
-        ### looping through each x-coordinate in each channel map
+        ### looping through each x-coordinate
         for i in range(nx):
             vert_profile = im[:,i]
 
             ### finding the flux maxima for each slice in the x-axis
-            j_max = search_maxima(vert_profile,threshold=sigma*std, dx=cube.bmaj/cube.pixelscale)
+            j_max = search_maxima(vert_profile, y_star, threshold=sigma*std, dx=cube.bmaj/cube.pixelscale)
                 
             ### require a minimum of 2 points; to identify surfaces above and below the star 
             if len(j_max) > 1: 
@@ -211,7 +211,19 @@ def detect_surface(cube, PA=None, plot=False, sigma=None, y_star=None, win=20):
                 ### storing only the 2 brightest maxima.
                 ### want j[i,0] to be below the star and j[i,1] to be above.
                 j_surf[i,:] = j_max[:2]
+
+                if i == 0:
+                    j_mean_old = y_star
+
+                if i > 0:
+                    j_mean = np.mean(j_max[:], axis=0)
+                    limit = (j_mean - j_mean_old)/j_mean_old
+                    #limit = 0.1
+
+                if (limit > 0.20):
+                    in_surface[i] = False
                 
+                '''
                 ### in case both the brightest points are on one side of the disk
                 #if y_star is not None:
                     
@@ -230,11 +242,12 @@ def detect_surface(cube, PA=None, plot=False, sigma=None, y_star=None, win=20):
                         in_surface[i] = False
                 else:
                     j_surf[i,:] = np.sort(j_max[:2])
-                  
+                '''
+                
                 ### refining position of maxima using a spatial quadratic
                 for k in range(2):
                     j = j_surf[i,k]
-
+                    
                     f_max = im[j,i]
                     f_minus = im[j-1,i]
                     f_plus = im[j+1,i]
@@ -250,8 +263,9 @@ def detect_surface(cube, PA=None, plot=False, sigma=None, y_star=None, win=20):
 
                     # Saving the coordinates
                     j_surf_exact[i,k] = y_max
-                    T_surf[i,k] = f_max 
-       
+                    T_surf[i,k] = f_max
+                j_mean_old = np.mean(j_surf_exact[:], axis=0)
+        
         #-- We test if front side is too high or the back side too low
         # this happens when the data gets noisy or diffuse and there are local maxima
         # fit a line to average curve and remove points from front if above average
@@ -259,6 +273,7 @@ def detect_surface(cube, PA=None, plot=False, sigma=None, y_star=None, win=20):
 
         if np.any(in_surface):
             x = np.arange(nx)
+            '''
             x1 = x[in_surface]
 
             y1 = np.mean(j_surf_exact[in_surface,:],axis=1)
@@ -277,7 +292,7 @@ def detect_surface(cube, PA=None, plot=False, sigma=None, y_star=None, win=20):
 
             #in_surface = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) # test only front surface
             in_surface = in_surface & (j_surf_exact[:,0] < (P[1] + P[0]*x)) & (j_surf_exact[:,1] > (P[1] + P[0]*x))
-
+            '''
             # Saving the data
             n = np.sum(in_surface)
             n_surf[iv] = n # number of points in that surface
@@ -314,13 +329,32 @@ def plot_surface(cube, n, x, y, Tb, iv, PA=None, win=20):
 
 
 
-def search_maxima(y, threshold=None, dx=0):
+def search_maxima(y, y_star, threshold=None, dx=0):
     ### passing im[:] as y[:] here ###
 
+    y_max_a = np.where(y[y_star:]>threshold)[0] + y_star
+    y_max_b = np.where(y[:y_star]>threshold)[0]
+
+    if ((len(y_max_a)>1) & (len(y_max_b)>1)):
+
+        y_max_a = y_max_a[np.argsort(y[y_max_a])][::-1]
+        y_max_b = y_max_b[np.argsort(y[y_max_b])][::-1]
+
+        i_max = []
+        i_max.append(y_max_b[0])
+        i_max.append(y_max_a[0])
+        
+    else:
+        i_max = []
+        
+    #print(i_max)   
+
+    '''
     ### measuring the change in flux between y[i] and y[i-1]
     dy = y[1:] - y[:-1]
 
-    ### finding maxima. a positive dy followed by a negative dy. stores all the points where this happens, don't worry about notation. 
+    ### finding maxima. a positive dy followed by a negative dy. stores all the points where this happens, don't worry about notation.
+    
     i_max = np.where((np.hstack((0, dy)) > 0) & (np.hstack((dy, 0)) < 0))[0]
     
     ### filtering out only y-coordinates above a signal to noise threshold
@@ -340,7 +374,7 @@ def search_maxima(y, threshold=None, dx=0):
                     flag_remove[i] = False # Keep current max
                     # remove the unwanted maxima
             i_max = i_max[~flag_remove]
-
+    '''
     return i_max
 
 
