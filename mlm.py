@@ -50,7 +50,7 @@ continuum = casa.Cube(f'{source_name}_continuum.fits')
 inc = np.radians(inclination)
 PA = position_angle
 v_syst = systemic_velocity
-sigma = 5
+sigma = 10
 
 for i in range(1):
     
@@ -61,9 +61,9 @@ for i in range(1):
     source = casa.Cube(f'{source_name}_{isotope[i]}.fits')
     print(f'{source_name}_{isotope[i]}')
     
-    n, x, y, T = measure_height.detect_surface(source, PA=PA, plot=plot_rotated_cube, sigma=sigma, y_star=y_star)
+    n, x, y, T, P = measure_height.detect_surface(source, PA=PA, plot=plot_rotated_cube, sigma=sigma, y_star=y_star, x_star=x_star)
 
-    r, h, v, Tb = measure_height.measure_mol_surface(source, n, x, y, T, inc=inc, x_star=x_star, y_star=y_star, v_syst=v_syst, distance=distance)
+    #r, h, v, Tb = measure_height.measure_mol_surface(source, n, x, y, T, inc=inc, x_star=x_star, y_star=y_star, v_syst=v_syst, distance=distance)
     
     #measure_height.plotting_mol_surface(r, h, v, Tb, i, isotope)
     
@@ -77,7 +77,7 @@ for i in range(1):
         nv = source.nv
         for j in range(nv):
             iv = j 
-            measure_height.plot_surface(source, n, x, y, T, iv, PA=PA, win=20)
+            measure_height.plot_surface(source, n, x, y, T, iv, P, PA=PA, win=20)
             plt.plot(x_star, y_star, '.', color='white')
             plt.savefig(f'{directory}/{source_name}_channel_{j}.png')
 '''           
