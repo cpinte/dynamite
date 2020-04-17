@@ -153,7 +153,7 @@ class Surface(dict):
         return list(self.keys())
 
 
-def detect_surface(cube, PA=None, plot=False, sigma=None, y_star=None, x_star=None, win=20):
+def detect_surface(cube, PA=None, plot=False, sigma=None, y_star=None, x_star=None):
     
     nx, nv = cube.nx, cube.nv
     
@@ -162,6 +162,9 @@ def detect_surface(cube, PA=None, plot=False, sigma=None, y_star=None, x_star=No
     y_surf = np.zeros([nv,nx,2])
     Tb_surf = np.zeros([nv,nx,2])
     P = np.zeros([nv,2])
+    x_old = np.zeros([nv,nx])
+    y_old = np.zeros([nv,nx,2])
+    n0_surf = np.zeros(nv, dtype=int)
     
     ### measure rms in the 1st channel 
     std = np.nanstd(cube.image[1,:,:])
@@ -170,7 +173,7 @@ def detect_surface(cube, PA=None, plot=False, sigma=None, y_star=None, x_star=No
     for iv in range(nv):
 
         if iv == nv-1:
-            print('total number of channels = '+str(nv))
+            print(f'total number of channels = {nv}')
             
         #print('channel '+str(iv+1)+" of "+str(nv))
 
@@ -204,15 +207,13 @@ def detect_surface(cube, PA=None, plot=False, sigma=None, y_star=None, x_star=No
             j_max = search_maxima(vert_profile, y_star, threshold=sigma*std, dx=cube.bmaj/cube.pixelscale)
                 
             ### require a minimum of 2 points; to identify surfaces above and below the star 
-            if len(j_max) > 1: 
+            if (len(j_max) > 1) & (abs(i - x_star) < 300): 
                 in_surface[i] = True
                 
-                ### storing only the 2 brightest maxima.
-                ### want j[i,0] to be below the star and j[i,1] to be above.
+                ### storing only the 2 brightest maxima. want j[i,0] to be below the star and j[i,1] to be above.
                 j_surf[i,:] = j_max[:2]
                 
                 ### in case both the brightest points are on one side of the disk
-                #if y_star is not None:
                  
                 if (j_surf[i,0] < y_star and j_surf[i,1] < y_star):
                     j_max_2nd = j_max[np.where(j_max > y_star)]
@@ -229,6 +230,9 @@ def detect_surface(cube, PA=None, plot=False, sigma=None, y_star=None, x_star=No
                         in_surface[i] = False
                 else:
                     j_surf[i,:] = np.sort(j_max[:2])
+
+                if ((j_surf[i,1] - y_star) > 300) or ((y_star - j_surf[i,0]) > 300):
+                    in_surface[i] = False
                 
                 ### refining position of maxima using a spatial quadratic
                 for k in range(2):
@@ -250,65 +254,21 @@ def detect_surface(cube, PA=None, plot=False, sigma=None, y_star=None, x_star=No
                     # Saving the coordinates
                     j_surf_exact[i,k] = y_max
                     T_surf[i,k] = f_max
-        
-        #-- We test if front side is too high or the back side too low
-        # this happens when the data gets noisy or diffuse and there are local maxima
-        # fit a line to average curve and remove points from front if above average
-        # and from back surface if below average (most of these should have been dealt with test on star position)
 
+        # cleaning each channel map
         if np.any(in_surface):
-            '''
-            x = np.arange(nx)
-            xp = x[in_surface] 
-
-            y0 = j_surf_exact[in_surface,0]
-            y1 = j_surf_exact[in_surface,1]
-
-            if len(xp) > 20:
-                len_xp = int(len(xp)/3)
-            else:
-                len_xp = int(len(xp))
-
-            xp = xp[:len_xp]
-            y0 = y0[:len_xp]
-            y1 = y1[:len_xp]               
-
-            x_origin = np.full(1000,x_star)          
-            y_origin = np.full(1000,y_star)
-
-            xp = np.hstack((x_origin,xp))
-            y0 = np.hstack((y_origin,y0))
-            y1 = np.hstack((y_origin,y1))
             
-            #y_com = np.hstack((y0,y1))
-            #y_new = np.hstack((j_surf_exact[:,0],j_surf_exact[:,1]))
-            
-            P0 = np.polyfit(xp,y0,2)
-            P1 = np.polyfit(xp,y1,2)
+            x = np.arange(nx) 
 
-            #P = np.polyfit(xp,y_com,2)
-            
-            limit0 = abs(j_surf_exact[:,0] - (P0[0] * x**2 + P0[1] * x + P0[2])) / (P0[0] * x**2 + P0[1] * x + P0[2])
-            limit1 = abs(j_surf_exact[:,1] - (P1[0] * x**2 + P1[1] * x + P1[2])) / (P1[0] * x**2 + P1[1] * x + P1[2])
-
-            #limit = abs(y_new - (P[0] * x**2 + P[1] * x + P[2])) / (P[0] * x**2 + P[1] * x + P[2])
-
-            #in_surface = in_surface & (limit < 0.05)
-            
-            #in_surface = in_surface & ((limit0 < 0.05) & (limit1 < 0.05)) 
-            #in_surface = in_surface & (j_surf_exact[:,0] < (P[1] + P[0]*x)) & (j_surf_exact[:,1] > (P[1] + P[0]*x))
-
-            if iv == 72:
-                plt.plot(xp, P0[0] * xp**2 + P0[1] * xp + P0[2], color='pink')
-                plt.plot(xp, P1[0] * xp**2 + P1[1] * xp + P1[2], color='purple')
-                #plt.plot(x, P[0] * x**2 + P[1] * x + P[2], color='purple')
-                plt.show() 
-            '''
-            
-            x = np.arange(nx)
+            n0 = np.sum(in_surface)
+            n0_surf[iv] = n0
+            if n0 > 0:
+                x_old[iv,:n0] = x[in_surface]
+                y_old[iv,:n0,:] = j_surf_exact[in_surface,:]
             
             x1 = x[in_surface]
             y1 = np.mean(j_surf_exact[in_surface,:],axis=1)
+            y0 = j_surf_exact[in_surface,:]
             
             if np.size(x1) > 10:
                 limit = int(np.size(x1)/4)
@@ -329,26 +289,12 @@ def detect_surface(cube, PA=None, plot=False, sigma=None, y_star=None, x_star=No
             
             P[iv,:] = np.polyfit(x2,y2,1)
 
-            limit = abs(np.mean(j_surf_exact[:,:],axis=1) - (P[iv,0]*x + P[iv,1])) / (P[iv,0]*x + P[iv,1])
-
-            star_limit = abs(y_star - (P[iv,0]*x_star + P[iv,1])) / (P[iv,0]*x_star + P[iv,1]) 
-            in_surface = in_surface & (limit < 0.05) & (star_limit < 0.025)        
-        
-            '''
-            #x_plot = np.array([0,nx])
-            #plt.plot(x_plot, P[1] + P[0]*x_plot)
-
-            in_surface_tmp = in_surface & (j_surf_exact[:,0] < (P[1] + P[0]*x)) # test only front surface
-            in_surface_tmp = in_surface & (j_surf_exact[:,0] < (P[1] + P[0]*x)) & (j_surf_exact[:,1] > (P[1] + P[0]*x))
-
-            # We remove the weird point and reddo the fit again to ensure the slope we use is not too bad
-            x1 = x[in_surface_tmp]
-            y1 = np.mean(j_surf_exact[in_surface_tmp,:],axis=1)
-            P = np.polyfit(x1,y1,1)
-
-            #in_surface = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) # test only front surface
-            in_surface = in_surface & (j_surf_exact[:,0] < (P[1] + P[0]*x)) & (j_surf_exact[:,1] > (P[1] + P[0]*x))
-            '''
+            trend_limit = abs(np.mean(j_surf_exact[:,:],axis=1) - (P[iv,0]*x + P[iv,1])) / (y0[limit-1,1] - y0[limit-1,0])
+            
+            star_limit = abs(y_star - (P[iv,0]*x_star + P[iv,1])) / (y0[limit-1,1] - y0[limit-1,0]) #(P[iv,0]*x_star + P[iv,1])
+            
+            in_surface = in_surface & (trend_limit < 0.10) & (star_limit < 0.10)
+            
             # Saving the data
             n = np.sum(in_surface)
             n_surf[iv] = n # number of points in that surface
@@ -356,13 +302,13 @@ def detect_surface(cube, PA=None, plot=False, sigma=None, y_star=None, x_star=No
                 x_surf[iv,:n] = x[in_surface]
                 y_surf[iv,:n,:] = j_surf_exact[in_surface,:]
                 Tb_surf[iv,:n,:] = T_surf[in_surface,:]
+                
 
-    
-    return n_surf, x_surf, y_surf, Tb_surf, P
+    return n_surf, x_surf, y_surf, Tb_surf, P, x_old, y_old, n0_surf
 
 
 
-def plot_surface(cube, n, x, y, Tb, iv, P, PA=None, win=20):
+def plot_surface(cube, n, x, y, Tb, iv, P, x_old, y_old, n0, PA=None, win=20):
 
     im = np.nan_to_num(cube.image[iv,:,:])
     if PA is not None:
@@ -370,29 +316,31 @@ def plot_surface(cube, n, x, y, Tb, iv, P, PA=None, win=20):
 
     plt.figure(win)
     plt.clf()
-    plt.imshow(im, origin="lower")#, interpolation="bilinear")
-
-    nx = cube.nx
-
-    #x_plot = np.array([0,nx])    
+    plt.imshow(im, origin="lower")#, interpolation="bilinear")  
 
     y_mean = np.mean(y[:,:,:],axis=2)
+
+    y0_mean = np.mean(y_old[:,:,:],axis=2)
+
+    if n0[iv]:
+        plt.plot(x_old[iv,:n0[iv]],y_old[iv,:n0[iv],0],"o",color="fuchsia",markersize=1.5, label='B.S. points removed')
+        plt.plot(x_old[iv,:n0[iv]],y_old[iv,:n0[iv],1],"o",color="cyan",markersize=1.5, label='T.S. points removed')
+        plt.plot(x_old[iv,:n0[iv]],y0_mean[iv,:n0[iv]],"o",color="yellow",markersize=1.5, label='avg. of points removed')
+        plt.plot(x_old[iv,:n0[iv]], P[iv,0]*x_old[iv,:n0[iv]] + P[iv,1], '--', color='black', markersize=0.5, label='trend line')
     
     if n[iv]:
-        plt.plot(x[iv,:n[iv]],y[iv,:n[iv],0],"o",color="red",markersize=1)
-        plt.plot(x[iv,:n[iv]],y[iv,:n[iv],1],"o",color="blue",markersize=1)
-        plt.plot(x[iv,:n[iv]],y_mean[iv,:n[iv]],"o",color="yellow",markersize=1)
-        #plt.plot(x_plot, P0[0] * x_plot**2 + P0[1] * x_plot + P0[2], color='pink')
-        #plt.plot(x_plot, P1[0] * x_plot**2 + P1[1] * x_plot + P1[2], color='purple')
-        #plt.plot(x_plot, P[0] * x_plot**2 + P[1] * x_plot + P[2], color='pink')
-        plt.plot(x, P[iv,0]*x + P[iv,1], '-', color='purple')
-       
+        plt.plot(x[iv,:n[iv]],y[iv,:n[iv],0],"o",color="red",markersize=1.5, label='B.S. points kept')
+        plt.plot(x[iv,:n[iv]],y[iv,:n[iv],1],"o",color="blue",markersize=1.5, label='T.S. points kept')
+        plt.plot(x[iv,:n[iv]],y_mean[iv,:n[iv]],"o",color="orange",markersize=1.5, label='avg. of points kept')
 
-        # We zoom on the detected surfaces
-        plt.xlim(np.min(x[iv,:n[iv]]) - 10*cube.bmaj/cube.pixelscale,np.max(x[iv,:n[iv]]) + 10*cube.bmaj/cube.pixelscale)
-        plt.ylim(np.min(y[iv,:n[iv],:]) - 10*cube.bmaj/cube.pixelscale,np.max(y[iv,:n[iv],:]) + 10*cube.bmaj/cube.pixelscale)
-
-
+    if n0[iv]:
+        # zoom-in on the detected surfaces
+        plt.xlim(np.min(x_old[iv,:n0[iv]]) - 5*cube.bmaj/cube.pixelscale, np.max(x_old[iv,:n0[iv]]) + 5*cube.bmaj/cube.pixelscale)
+        plt.ylim(np.min(y_old[iv,:n0[iv],:]) - 5*cube.bmaj/cube.pixelscale, np.max(y_old[iv,:n0[iv],:]) + 5*cube.bmaj/cube.pixelscale)
+        #adding a legend
+        plt.legend(loc='best', prop={'size': 6})
+    
+        
 
 def search_maxima(y, y_star, threshold=None, dx=0):
     ### passing im[:] as y[:] here ###
