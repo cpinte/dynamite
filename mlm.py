@@ -20,17 +20,17 @@ import os
 #distance_list = [121, 101, 134, 161, 123, 138, 116, 155, 148, 165]
 
 ### plotting options
-plot_layers = False
-plot_continuum = False
+plot_layers = True
+plot_continuum = True
 plot_rotated_cube = False
 
 ### adjust these parameters for each source
-source_name = 'HD163296'
+source_name = 'AS209'
 isotope = ['CO','13CO','C18O']
-inclination = 47                  # in degrees
-position_angle = 133              # in degrees    
-systemic_velocity = 5.7           # same units as in the cube
-distance = 101                    # in parsecs    
+inclination = 35                  # in degrees
+position_angle = 87              # in degrees    
+systemic_velocity = 4.75           # same units as in the cube
+distance = 121                    # in parsecs    
 
 ###############################################################################################################
 
@@ -46,14 +46,19 @@ condition = False
 continuum = casa.Cube(f'{source_name}_continuum.fits')
 source_cube = casa.Cube(f'{source_name}_{isotope[0]}.fits')
 for j in range(100):
-    y_star, x_star = measure_height.star_location(source_cube, continuum, j, PA=PA, plot=plot_continuum, condition=condition) 
+    y_star, x_star = measure_height.star_location(source_cube, continuum, j, PA=PA, condition=condition) 
     condition = input("happy with star coordinates? [y/n] : ")
     if condition == 'y':
-        plt.grid(b=None)
-        plt.legend(loc='upper right', prop={'size': 8})
-        plt.savefig(f'{source_name}_continuum.png')
+        if plot_continuum is True:
+            plt.grid(b=None)
+            plt.legend(loc='upper right', prop={'size': 8})
+            plt.savefig(f'{source_name}_continuum.png')
         plt.close()
         break
+
+directory = f'{source_name}_layers'
+if not os.path.exists(directory):
+    os.mkdir(directory)
 
 for k in range(3):
     plt.figure(plot[k])
@@ -66,10 +71,6 @@ for i in range(1):
         
     source = casa.Cube(f'{source_name}_{isotope[i]}.fits')
     print(f'{source_name}_{isotope[i]}')
-
-    directory = f'{source_name}_layers'
-    if not os.path.exists(directory):
-        os.mkdir(directory)
     
     n, x, y, T, P, x_old, y_old, n0 = measure_height.detect_surface(source, i, isotope, directory, PA=PA, plot=plot_rotated_cube, sigma=sigma, y_star=y_star, x_star=x_star)
 

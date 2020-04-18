@@ -372,7 +372,7 @@ def search_maxima(y, y_star, threshold=None, dx=0):
 
 
 
-def star_location(cube, continuum, j, PA=False, plot=False, condition=False):
+def star_location(cube, continuum, j, PA=False, condition=False):
 
     nx = cube.nx
     
