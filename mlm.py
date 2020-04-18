@@ -22,17 +22,17 @@ import os
 #distance_list = [121, 101, 134, 161, 123, 138, 116, 155, 148, 165]
 
 ### plotting options
-plot_layers = True
+plot_layers = False
 plot_continuum = False
 plot_rotated_cube = False
 
 ### adjust these parameters for each source
-source_name = 'HD163296'
+source_name = 'IM_Lupi'
 isotope = ['CO','13CO','C18O']
-inclination = 47                  # in degrees
-position_angle = 133              # in degrees    
-systemic_velocity = 5.7           # same units as in the cube
-distance = 101                    # in parsecs
+inclination = 48                  # in degrees
+position_angle = 143              # in degrees    
+systemic_velocity = 4.5           # same units as in the cube
+distance = 161                    # in parsecs
 
 ###############################################################################################################
 
@@ -52,7 +52,8 @@ PA = position_angle
 v_syst = systemic_velocity
 sigma = 5
 
-for i in range(1):
+# i : no. of isotopes. change accordingly.
+for i in range(3):
     
     if i == 0:
         source = casa.Cube(f'{source_name}_{isotope[0]}.fits')
@@ -66,13 +67,12 @@ for i in range(1):
     r, h, v, Tb = measure_height.measure_mol_surface(source, n, x, y, T, inc=inc, x_star=x_star, y_star=y_star, v_syst=v_syst, distance=distance)
     
     measure_height.plotting_mol_surface(r, h, v, Tb, i, isotope)
+
+    directory = f'{source_name}_layers'
+    if not os.path.exists(directory):
+        os.mkdir(directory)
     
     if plot_layers is True:
-
-        directory = f'{source_name}_layers'
-
-        if not os.path.exists(directory):
-            os.mkdir(directory)
         
         nv = source.nv
         for j in range(nv):

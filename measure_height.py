@@ -25,7 +25,7 @@ def measure_mol_surface(cube, n, x, y, T, inc=None, x_star=None, y_star=None, v_
     y_b = y[:,:,0]                        # y[channel number, x value, y value below star]
 
     y_c = (y_a + y_b) / 2.
-    mask = (y_c == 0)
+    mask = (y_c == 0)                     # removing x coordinates with no mapping.
     y_centre = np.ma.masked_array(y_c,mask).compressed()
     
     if (len(np.where(y_centre.ravel()<y_star)[0]) > 0.5*len(y_centre.ravel())):
@@ -47,27 +47,27 @@ def measure_mol_surface(cube, n, x, y, T, inc=None, x_star=None, y_star=None, v_
         r *= distance
         h *= distance
 
+    print(f'total no. of points = {len(r.ravel()) - np.sum(mask)}')
     mask1 = np.isinf(v) | np.isnan(v)
-    print(f'no. of channels with invalid velocities removed = {np.sum(mask1)}')
-    mask2 = mask1 | (np.abs(cube.velocity[:,np.newaxis] - v_syst) < 0.4)
-    print(f'no. of points outside filter removed = {np.sum(mask2)-np.sum(mask1)}')
-    mask3 = mask2 | (h<0) | (r>400)
+    print(f'no. of points with undefined velocities removed = {np.sum(mask1)}')
+    mask2 = mask1 | (h<0) #| (np.abs(cube.velocity[:,np.newaxis] - v_syst) < 0.4)
+    print(f'no. of negative height outliers removed = {np.sum(mask2)-np.sum(mask1) - np.sum(mask)}')
 
-    r = np.ma.masked_array(r,mask3).compressed()
-    h = np.ma.masked_array(h,mask3).compressed()
-    v = np.ma.masked_array(v,mask3).compressed()
-    B = np.ma.masked_array(B,mask3).compressed()
+    r = np.ma.masked_array(r,mask2).compressed()
+    h = np.ma.masked_array(h,mask2).compressed()
+    v = np.ma.masked_array(v,mask2).compressed()
+    B = np.ma.masked_array(B,mask2).compressed()
 
     if (np.mean(v) < 0):
         v = -v
     
-    mask4 = (v<0)
-    print(f'no. of outliers removed = {(np.sum(mask3)-np.sum(mask2))+np.sum(mask4)}')
+    mask3 = (v<0)
+    print(f'no. of negative velocity outliers removed = {np.sum(mask3)}')
     
-    r = np.ma.masked_array(r,mask4).compressed()
-    h = np.ma.masked_array(h,mask4).compressed()
-    v = np.ma.masked_array(v,mask4).compressed()
-    B = np.ma.masked_array(B,mask4).compressed()
+    r = np.ma.masked_array(r,mask3).compressed()
+    h = np.ma.masked_array(h,mask3).compressed()
+    v = np.ma.masked_array(v,mask3).compressed()
+    B = np.ma.masked_array(B,mask3).compressed()
     
     Tb = cube._Jybeam_to_Tb(B)
 
