@@ -61,16 +61,16 @@ for i in range(3):
         
     source = casa.Cube(f'{source_name}_{isotope[i]}.fits')
     print(f'{source_name}_{isotope[i]}')
-    
-    n, x, y, T, P, x_old, y_old, n0 = measure_height.detect_surface(source, PA=PA, plot=plot_rotated_cube, sigma=sigma, y_star=y_star, x_star=x_star)
-
-    r, h, v, Tb = measure_height.measure_mol_surface(source, n, x, y, T, inc=inc, x_star=x_star, y_star=y_star, v_syst=v_syst, distance=distance)
-    
-    measure_height.plotting_mol_surface(r, h, v, Tb, i, isotope)
 
     directory = f'{source_name}_layers'
     if not os.path.exists(directory):
         os.mkdir(directory)
+    
+    n, x, y, T, P, x_old, y_old, n0 = measure_height.detect_surface(source, PA=PA, plot=plot_rotated_cube, sigma=sigma, y_star=y_star, x_star=x_star, i, isotope, directory)
+
+    r, h, v, Tb = measure_height.measure_mol_surface(source, n, x, y, T, inc=inc, x_star=x_star, y_star=y_star, v_syst=v_syst, distance=distance)
+    
+    measure_height.plotting_mol_surface(r, h, v, Tb, i, isotope)
     
     if plot_layers is True:
         

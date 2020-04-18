@@ -153,7 +153,7 @@ class Surface(dict):
         return list(self.keys())
 
 
-def detect_surface(cube, PA=None, plot=False, sigma=None, y_star=None, x_star=None):
+def detect_surface(cube, PA=None, plot=False, sigma=None, y_star=None, x_star=None, i, isotope):
     
     nx, nv = cube.nx, cube.nv
     
@@ -174,15 +174,13 @@ def detect_surface(cube, PA=None, plot=False, sigma=None, y_star=None, x_star=No
 
         if iv == nv-1:
             print(f'total number of channels = {nv}')
-            
-        #print('channel '+str(iv+1)+" of "+str(nv))
 
         ### rotate the image so semi-major axis is aligned with x-axis
         im = np.nan_to_num(cube.image[iv,:,:])
         if PA is not None:
             im = np.array(rotate(im, PA - 90.0, reshape=False))
 
-        ### plotting rotated channel map (if needed)
+        ### plotting rotated velocity cube (if needed)
         if plot is True:
             if iv==0:
                 img_rotated_list=[]
@@ -191,7 +189,7 @@ def detect_surface(cube, PA=None, plot=False, sigma=None, y_star=None, x_star=No
             img_rotated_array = np.array(img_rotated_list)
 
             if iv==nv-1:
-                fits.writeto('CO_rotated.fits', img_rotated_array, overwrite=True)
+                fits.writeto(f'{directory}/{isotope[i]}_rotated.fits', img_rotated_array, overwrite=True)
         
         ### setting up arrays in each channel map
         in_surface = np.full(nx,False)         #creates an array the size of nx without a fill value (False).
@@ -199,7 +197,7 @@ def detect_surface(cube, PA=None, plot=False, sigma=None, y_star=None, x_star=No
         j_surf_exact = np.zeros([nx,2])
         T_surf = np.zeros([nx,2])
         
-        ### looping through each x-coordinate
+        ### LOOPING THROUGH EACH X-COORDINATE 
         for i in range(nx):
             vert_profile = im[:,i]
 
@@ -255,7 +253,7 @@ def detect_surface(cube, PA=None, plot=False, sigma=None, y_star=None, x_star=No
                     j_surf_exact[i,k] = y_max
                     T_surf[i,k] = f_max
 
-        # cleaning each channel map
+        # CLEANING EACH CHANNEL MAP
         if np.any(in_surface):
             
             x = np.arange(nx) 
@@ -344,79 +342,11 @@ def plot_surface(cube, n, x, y, Tb, iv, P, x_old, y_old, n0, PA=None, win=20):
 
 def search_maxima(y, y_star, threshold=None, dx=0):
     ### passing im[:] as y[:] here ###
-    '''
-    i_max = []
-
-    for k in range(2):
-        #print(k)
-        if k == 0:
-            yp = y[:y_star] 
-        elif k == 1:
-            yp = y[y_star:] + y_star
-        #print(y)
-        dy = yp[1:] - yp[:-1]
-
-        y_max = np.where((np.hstack((0, dy)) > 0) & (np.hstack((dy, 0)) < 0))[0]
-
-        if threshold is not None:
-            y_max = y_max[np.where(yp[y_max]>threshold)]
-
-        y_max = y_max[np.argsort(yp[y_max])][::-1] 
-
-        if np.size(y_max) > 0:
-            if dx > 1:
-                flag_remove = np.zeros(np.size(y_max), dtype=bool)
-                for i in range(np.size(y_max)):
-                    if not flag_remove[i]:
-                        flag_remove = flag_remove | (y_max >= y_max[i] - dx) & (y_max <= y_max[i] + dx)
-                        flag_remove[i] = False # Keep current max
-                y_max = y_max[~flag_remove]
-
-            #print(y_max)
-            i_max.append(y_max[0])
-            
-        print(i_max)
-
-    
-    y_max_a = np.where(y[y_star:]>threshold)[0] + y_star
-
-    ### sorting y-coordinates from highest to lowest in flux
-    
-    if np.size(y_max_a) > 0:
-        if dx > 1:
-            flag_remove = np.zeros(np.size(y_max_a), dtype=bool)
-            for i in range(np.size(y_max_a)):
-                if not flag_remove[i]:
-                    flag_remove = flag_remove | (y_max_a >= y_max_a[i] - dx) & (y_max_a <= y_max_a[i] + dx)
-                    flag_remove[i] = False # Keep current max
-            y_max_a = y_max_a[~flag_remove]
-    
-    y_max_b = np.where(y[:y_star]>threshold)[0]
-
-    if np.size(y_max_b) > 0:
-        if dx > 1:
-            flag_remove = np.zeros(np.size(y_max_b), dtype=bool)
-            for i in range(np.size(y_max_b)):
-                if not flag_remove[i]:
-                    flag_remove = flag_remove | (y_max_b >= y_max_b[i] - dx) & (y_max_b <= y_max_b[i] + dx)
-                    flag_remove[i] = False # Keep current max
-            y_max_b = y_max_b[~flag_remove]
-
-    if ((len(y_max_a)>1) & (len(y_max_b)>1)):
-        i_max = []
-        i_max.append((y_max_b[np.argsort(y[y_max_b])][::-1])[0])
-        i_max.append((y_max_a[np.argsort(y[y_max_a])][::-1])[0])
-        
-    else:
-        i_max = []
-
-    #print(i_max)   
-    '''
     
     ### measuring the change in flux between y[i] and y[i-1]
     dy = y[1:] - y[:-1]
 
-    ### finding maxima. a positive dy followed by a negative dy. stores all the points where this happens, don't worry about notation.
+    ### finding maxima. a positive dy followed by a negative dy. don't worry about notation.
     
     i_max = np.where((np.hstack((0, dy)) > 0) & (np.hstack((dy, 0)) < 0))[0]
     
