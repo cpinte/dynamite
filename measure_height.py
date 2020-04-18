@@ -50,7 +50,7 @@ def measure_mol_surface(cube, n, x, y, T, inc=None, x_star=None, y_star=None, v_
     print(f'total no. of points = {len(r.ravel()) - np.sum(mask)}')
     mask1 = np.isinf(v) | np.isnan(v)
     print(f'no. of points with undefined velocities removed = {np.sum(mask1)}')
-    mask2 = mask1 | (h<0) #| (np.abs(cube.velocity[:,np.newaxis] - v_syst) < 0.4)
+    mask2 = mask1 | (h<0) | (r>1000)#| (np.abs(cube.velocity[:,np.newaxis] - v_syst) < 0.4)
     print(f'no. of negative height outliers removed = {np.sum(mask2)-np.sum(mask1) - np.sum(mask)}')
 
     r = np.ma.masked_array(r,mask2).compressed()
@@ -153,7 +153,7 @@ class Surface(dict):
         return list(self.keys())
 
 
-def detect_surface(cube, PA=None, plot=False, sigma=None, y_star=None, x_star=None, i, isotope):
+def detect_surface(cube, i, isotope, directory, PA=None, plot=False, sigma=None, y_star=None, x_star=None):
     
     nx, nv = cube.nx, cube.nv
     
@@ -372,28 +372,47 @@ def search_maxima(y, y_star, threshold=None, dx=0):
 
 
 
-def star_location(source, continuum, PA=False, plot=False, name=False):
+def star_location(cube, continuum, j, PA=False, plot=False, condition=False):
 
-    nx = source.nx
+    nx = cube.nx
     
     continuum = np.nan_to_num(continuum.image[0,:,:])
     continuum = resize(continuum, (nx,nx))
     continuum = np.array(rotate(continuum, PA - 90.0, reshape=False))
-    star_coordinates = np.where(continuum == np.amax(continuum))
-    listofcordinates = list(zip(star_coordinates[0], star_coordinates[1]))
-   
-    for cord in listofcordinates:
-        print('coordinates of maximum in continuum image (y,x) = '+str(cord))
 
-    y_star = cord[0] 
-    x_star = cord[1]
-    
-    if plot is True:
+    if j==0:
+        star_coordinates = np.where(continuum == np.amax(continuum))
+        listofcordinates = list(zip(star_coordinates[0], star_coordinates[1]))
+   
+        for cord in listofcordinates:
+            print('coordinates of maximum in continuum image (y,x) = '+str(cord))
+
+        y_star = cord[0] 
+        x_star = cord[1]
+
         plt.figure('continuum')
         plt.clf()
         plt.imshow(continuum, origin='lower')
-        plt.plot(cord[1],cord[0], '.', color='red')
-        plt.savefig(f'{name}_continuum.png')
+        plt.plot(x_star,y_star, '.', color='red', label=f'(x,y) = ({x_star},{y_star})')
+        plt.xlim(0.33*nx, 0.66*nx)
+        plt.ylim(0.33*nx, 0.66*nx)
+        plt.grid(color='white')
+        plt.show(block=False)
+        
+    if condition == 'n':
+        y_star = float(input("enter y_star index coordinate :"))
+        x_star = float(input("enter x_star index coordinate :"))
+        print(y_star,x_star)
+        plt.close()
+
+        plt.figure('continuum')
+        plt.clf()
+        plt.imshow(continuum, origin='lower')
+        plt.plot(x_star,y_star, '.', color='red', label=f'(x,y) = ({x_star},{y_star})')
+        plt.xlim(0.33*nx, 0.66*nx)
+        plt.ylim(0.33*nx, 0.66*nx)
+        plt.grid(color='white')
+        plt.show(block=False)
 
     return y_star, x_star
     

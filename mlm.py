@@ -9,8 +9,6 @@ from scipy.ndimage import rotate
 from colorama import Fore, Style
 import os
 
-# enter inclination (inc) and position angle (PA) in degrees.
-
 #Sz (y,x) = 750, 752  , WaOph6 (y,x) = 720,719
 #sources systemic velocity:
 # IM Lupi = 48 inc, 143 PA, 4.5 km/s , 161 pc. point scatter(limit) < 0.04 and star limit < 0.025
@@ -27,17 +25,35 @@ plot_continuum = False
 plot_rotated_cube = False
 
 ### adjust these parameters for each source
-source_name = 'IM_Lupi'
+source_name = 'HD163296'
 isotope = ['CO','13CO','C18O']
-inclination = 48                  # in degrees
-position_angle = 143              # in degrees    
-systemic_velocity = 4.5           # same units as in the cube
-distance = 161                    # in parsecs
+inclination = 47                  # in degrees
+position_angle = 133              # in degrees    
+systemic_velocity = 5.7           # same units as in the cube
+distance = 101                    # in parsecs    
 
 ###############################################################################################################
 
 plot = ['height', 'velocity', 'brightness temperature']
 axis = ['r (au)', 'h (au)', 'v (km/s)', 'Tb (K)']
+
+inc = np.radians(inclination)
+PA = position_angle
+v_syst = systemic_velocity
+sigma = 5
+condition = False
+
+continuum = casa.Cube(f'{source_name}_continuum.fits')
+source_cube = casa.Cube(f'{source_name}_{isotope[0]}.fits')
+for j in range(100):
+    y_star, x_star = measure_height.star_location(source_cube, continuum, j, PA=PA, plot=plot_continuum, condition=condition) 
+    condition = input("happy with star coordinates? [y/n] : ")
+    if condition == 'y':
+        plt.grid(b=None)
+        plt.legend(loc='upper right', prop={'size': 8})
+        plt.savefig(f'{source_name}_continuum.png')
+        plt.close()
+        break
 
 for k in range(3):
     plt.figure(plot[k])
@@ -45,19 +61,8 @@ for k in range(3):
     plt.xlabel(axis[0], labelpad=7)
     plt.ylabel(axis[k+1], labelpad=7)
 
-continuum = casa.Cube(f'{source_name}_continuum.fits')
-
-inc = np.radians(inclination)
-PA = position_angle
-v_syst = systemic_velocity
-sigma = 5
-
 # i : no. of isotopes. change accordingly.
-for i in range(3):
-    
-    if i == 0:
-        source = casa.Cube(f'{source_name}_{isotope[0]}.fits')
-        y_star, x_star = measure_height.star_location(source, continuum, PA=PA, plot=plot_continuum, name=source_name)
+for i in range(1):
         
     source = casa.Cube(f'{source_name}_{isotope[i]}.fits')
     print(f'{source_name}_{isotope[i]}')
@@ -66,7 +71,7 @@ for i in range(3):
     if not os.path.exists(directory):
         os.mkdir(directory)
     
-    n, x, y, T, P, x_old, y_old, n0 = measure_height.detect_surface(source, PA=PA, plot=plot_rotated_cube, sigma=sigma, y_star=y_star, x_star=x_star, i, isotope, directory)
+    n, x, y, T, P, x_old, y_old, n0 = measure_height.detect_surface(source, i, isotope, directory, PA=PA, plot=plot_rotated_cube, sigma=sigma, y_star=y_star, x_star=x_star)
 
     r, h, v, Tb = measure_height.measure_mol_surface(source, n, x, y, T, inc=inc, x_star=x_star, y_star=y_star, v_syst=v_syst, distance=distance)
     
