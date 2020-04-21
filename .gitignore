@@ -1,0 +1,10 @@
+*.png
+*.fits
+*.pdf
+*.py~
+test.py
+/DSHARP_Layers
+/Layers
+/backup copy
+/_pycache_
+.DS_Store
