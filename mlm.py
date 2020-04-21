@@ -30,7 +30,8 @@ isotope = ['CO','13CO','C18O']
 inclination = 35                  # in degrees
 position_angle = 87              # in degrees    
 systemic_velocity = 4.75           # same units as in the cube
-distance = 121                    # in parsecs    
+distance = 121                    # in parsecs
+iso = 3                          # no. of isotopes from 'isotope' list to run
 
 ###############################################################################################################
 
@@ -66,8 +67,7 @@ for k in range(3):
     plt.xlabel(axis[0], labelpad=7)
     plt.ylabel(axis[k+1], labelpad=7)
 
-# i : no. of isotopes. change accordingly.
-for i in range(1):
+for i in range(iso):
         
     source = casa.Cube(f'{source_name}_{isotope[i]}.fits')
     print(f'{source_name}_{isotope[i]}')
