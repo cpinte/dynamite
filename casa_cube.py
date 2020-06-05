@@ -257,7 +257,7 @@ class Cube:
 
             beam = Ellipse(ax.transLimits.inverted().transform((dx, dy)),
                            width=bmin, height=bmaj, angle=-bpa,
-                           fill=True, color="grey")
+                           fill=True, color="black")
             ax.add_patch(beam)
 
         return image

@@ -2,6 +2,9 @@
 *.fits
 *.pdf
 *.py~
+*.jpg
+*.svg
+*.zip
 test.py
 /DSHARP_Layers
 /Layers

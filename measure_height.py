@@ -6,6 +6,8 @@ import scipy.constants as sc
 from scipy.stats import binned_statistic
 from astropy.io import fits
 from skimage.transform import resize
+import matplotlib.cm as cm
+from matplotlib.patches import Ellipse
 
 ##############################################################################
 
@@ -71,7 +73,7 @@ def measure_mol_surface(cube, n, x, y, T, inc=None, x_star=None, y_star=None, v_
     
     Tb = cube._Jybeam_to_Tb(B)
 
-    print(f'no. of plots left for plotting = {len(r.ravel())}')
+    print(f'no. of points left for plotting = {len(r.ravel())}')
     
     return r, h, v, Tb
 
@@ -153,7 +155,7 @@ class Surface(dict):
         return list(self.keys())
 
 
-def detect_surface(cube, i, isotope, directory, PA=None, plot=False, sigma=None, y_star=None, x_star=None):
+def detect_surface(cube, i, isotope, directory, PA=None, plot=False, sigma=None, y_star=None, x_star=None, v_syst=None):
     
     nx, nv = cube.nx, cube.nv
     
@@ -172,6 +174,8 @@ def detect_surface(cube, i, isotope, directory, PA=None, plot=False, sigma=None,
     ### stepping through each channel map
     for iv in range(nv):
 
+        v = cube.velocity[iv]
+        
         if iv == nv-1:
             print(f'total number of channels = {nv}')
 
@@ -182,21 +186,21 @@ def detect_surface(cube, i, isotope, directory, PA=None, plot=False, sigma=None,
 
         ### plotting rotated velocity cube (if needed)
         if plot is True:
-            if iv==0:
+            if iv == 0:
                 img_rotated_list=[]
 
             img_rotated_list.append(im)
             img_rotated_array = np.array(img_rotated_list)
 
-            if iv==nv-1:
-                fits.writeto(f'{directory}/{isotope[i]}_rotated.fits', img_rotated_array, overwrite=True)
+            if iv == nv-1:
+                fits.writeto(f'{directory}/rotated.fits', img_rotated_array, overwrite=True)
         
         ### setting up arrays in each channel map
         in_surface = np.full(nx,False)         #creates an array the size of nx without a fill value (False).
         j_surf = np.zeros([nx,2], dtype=int)
         j_surf_exact = np.zeros([nx,2])
         T_surf = np.zeros([nx,2])
-        
+
         ### LOOPING THROUGH EACH X-COORDINATE 
         for i in range(nx):
             vert_profile = im[:,i]
@@ -228,8 +232,13 @@ def detect_surface(cube, i, isotope, directory, PA=None, plot=False, sigma=None,
                         in_surface[i] = False
                 else:
                     j_surf[i,:] = np.sort(j_max[:2])
-
+                
                 if ((j_surf[i,1] - y_star) > 300) or ((y_star - j_surf[i,0]) > 300):
+                    in_surface[i] = False
+                
+                if (v <= v_syst) & (i < x_star):
+                    in_surface[i] = False
+                elif (v > v_syst) & (i > x_star):
                     in_surface[i] = False
                 
                 ### refining position of maxima using a spatial quadratic
@@ -255,9 +264,12 @@ def detect_surface(cube, i, isotope, directory, PA=None, plot=False, sigma=None,
 
         # CLEANING EACH CHANNEL MAP
         if np.any(in_surface):
-            
-            x = np.arange(nx) 
 
+            beam_min = cube.bmin/cube.pixelscale
+            beam_maj = cube.bmaj/cube.pixelscale
+            
+            x = np.arange(nx)
+            
             n0 = np.sum(in_surface)
             n0_surf[iv] = n0
             if n0 > 0:
@@ -265,33 +277,86 @@ def detect_surface(cube, i, isotope, directory, PA=None, plot=False, sigma=None,
                 y_old[iv,:n0,:] = j_surf_exact[in_surface,:]
             
             x1 = x[in_surface]
-            y1 = np.mean(j_surf_exact[in_surface,:],axis=1)
-            y0 = j_surf_exact[in_surface,:]
+            y_mean = np.mean(j_surf_exact[in_surface,:],axis=1)
             
-            if np.size(x1) > 10:
-                limit = int(np.size(x1)/4)
-            else:
-                limit = int(np.size(x1))
+            # if there is no signal within a few pixels of the star, then it's just picking up noise. remove these channels.
+            if v <= v_syst:
+                x_diff = x1[0] - x_star
+                if (x_diff > 5):
+                    in_surface[:] = False
+            elif v > v_syst:
+                x1 = x1[::-1]
+                x_diff = abs(x1[0] - x_star)
+                if (x_diff > 5):
+                    in_surface[:] = False
+ 
+            if v <= v_syst:
+                # remove points close to the star along the horizotal axis.
+                for i in range(len(x1)):
+                    if (x1[i] - x_star <= 1):
+                        j = x1[i]
+                        in_surface[j] = False
+                    else:
+                        break
+                #if the point close to star is noise.
+                for i in range(len(x1)):
+                    if (abs(y_mean[i] - y_star) >= beam_min):
+                        j = x1[i]
+                        in_surface[j] = False
+                    else:
+                        break
+            elif v > v_syst:
+                # repeat above procedure for other side of disc.
+                y_mean = y_mean[::-1]  # don't need to invert x1 again.
+                for i in range(len(x1)):
+                    if (abs(x1[i] - x_star) <= 1):
+                        j = x1[i]
+                        in_surface[j] = False
+                    else:
+                        break
+                for i in range(len(x1)):
+                    if (abs(y_mean[i] - y_star) >= beam_min):
+                        j = x1[i]
+                        in_surface[j] = False
+                    else:
+                        break
 
-            if np.size(x1) > 10:
-                if (np.mean(x1) < x_star):
-                    limit = int(3*limit)
-                    x2 = x1[limit:]
-                    y2 = y1[limit:]
-                else:
-                    x2 = x1[:limit]
-                    y2 = y1[:limit]
-            else:
-                x2 = x1[:limit]
-                y2 = y1[:limit]
-            
-            P[iv,:] = np.polyfit(x2,y2,1)
+        if np.any(in_surface):
 
-            trend_limit = abs(np.mean(j_surf_exact[:,:],axis=1) - (P[iv,0]*x + P[iv,1])) / (y0[limit-1,1] - y0[limit-1,0])
-            
-            star_limit = abs(y_star - (P[iv,0]*x_star + P[iv,1])) / (y0[limit-1,1] - y0[limit-1,0]) #(P[iv,0]*x_star + P[iv,1])
-            
-            in_surface = in_surface & (trend_limit < 0.10) & (star_limit < 0.10)
+            x1 = x[in_surface]
+            y_0 = j_surf_exact[in_surface,0]
+            y_1 = j_surf_exact[in_surface,1]
+
+            # removing points that are discontinuous, along both x and y axis.
+            if v <= v_syst:
+                for i in range(len(x1)-1):
+                    if (x1[i+1] - x1[i]) >= 5:
+                        j = x1[i+1]
+                        in_surface[j:] = False
+                        break
+                for i in range(len(x1)-1):
+                    if (abs(y_0[i+1] - y_0[i]) >= 5) or (abs(y_1[i+1] - y_1[i]) >= 5):
+                        if (abs(x1[i+1] - x_star) >= 5):
+                            j = x1[i+1]
+                            in_surface[j:] = False
+                            break
+            elif v > v_syst:
+                x1 = x1[::-1]
+                y_0 = y_0[::-1]
+                y_1 = y_1[::-1]
+                for i in range(len(x1)-1): 
+                    if abs(x1[i+1] - x1[i]) >= 5:
+                        j = x1[i]
+                        in_surface[:j] = False
+                        break
+                for i in range(len(x1)-1):
+                    if (abs(y_0[i+1] - y_0[i]) >= 5) or (abs(y_1[i+1] - y_1[i]) >= 5):
+                        if (abs(x1[i+1] - x_star) >= 5):
+                            j = x1[i]
+                            in_surface[:j] = False
+                            break
+
+        if np.any(in_surface):
             
             # Saving the data
             n = np.sum(in_surface)
@@ -308,13 +373,24 @@ def detect_surface(cube, i, isotope, directory, PA=None, plot=False, sigma=None,
 
 def plot_surface(cube, n, x, y, Tb, iv, P, x_old, y_old, n0, PA=None, win=20):
 
-    im = np.nan_to_num(cube.image[iv,:,:])
+    im = np.nan_to_num(cube.image[iv,:,:])*1000.
     if PA is not None:
         im = np.array(rotate(im, PA - 90.0, reshape=False))
 
+    whole = np.nan_to_num(cube.image[:,:,:])*1000.
+
     plt.figure(win)
     plt.clf()
-    plt.imshow(im, origin="lower")#, interpolation="bilinear")  
+    plt.xlabel('pixel')
+    plt.ylabel('pixel')
+
+    beam_maj = cube.bmaj/cube.pixelscale
+    beam_min = cube.bmin/cube.pixelscale
+    beam_bpa = cube.bpa
+    
+    image = plt.imshow(im, origin="lower", cmap=cm.Purples_r, vmin=0, vmax=np.max(whole))
+    cbar = plt.colorbar(image)
+    cbar.set_label('mJy/beam')
 
     y_mean = np.mean(y[:,:,:],axis=2)
 
@@ -333,12 +409,17 @@ def plot_surface(cube, n, x, y, Tb, iv, P, x_old, y_old, n0, PA=None, win=20):
 
     if n0[iv]:
         # zoom-in on the detected surfaces
-        plt.xlim(np.min(x_old[iv,:n0[iv]]) - 5*cube.bmaj/cube.pixelscale, np.max(x_old[iv,:n0[iv]]) + 5*cube.bmaj/cube.pixelscale)
-        plt.ylim(np.min(y_old[iv,:n0[iv],:]) - 5*cube.bmaj/cube.pixelscale, np.max(y_old[iv,:n0[iv],:]) + 5*cube.bmaj/cube.pixelscale)
+        plt.xlim(np.min(x_old[iv,:n0[iv]]) - 5*beam_maj, np.max(x_old[iv,:n0[iv]]) + 5*cube.bmaj/cube.pixelscale)
+        plt.ylim(np.min(y_old[iv,:n0[iv],:]) - 5*beam_maj, np.max(y_old[iv,:n0[iv],:]) + 5*cube.bmaj/cube.pixelscale)
         #adding a legend
-        plt.legend(loc='best', prop={'size': 6})
+        #plt.legend(loc='best', prop={'size': 6})
+
+        #adding a beam
+        ax = plt.gca()
+        beam = Ellipse(xy=(np.min(x_old[iv,:n0[iv]])-3*beam_maj,np.min(y_old[iv,:n0[iv],:])-3*beam_maj), width=beam_min, height=beam_maj, angle=-beam_bpa, fill=True, color='white')
+        ax.add_patch(beam)
+
     
-        
 
 def search_maxima(y, y_star, threshold=None, dx=0):
     ### passing im[:] as y[:] here ###
@@ -376,10 +457,13 @@ def star_location(cube, continuum, j, PA=False, condition=False):
 
     nx = cube.nx
     
-    continuum = np.nan_to_num(continuum.image[0,:,:])
-    continuum = resize(continuum, (nx,nx))
+    #continuum = np.nan_to_num(continuum.image[0,:,:])
+    #continuum = resize(continuum, (nx,nx))
+    #continuum = np.array(rotate(continuum, PA - 90.0, reshape=False))
+    #continuum = continuum*1000.
+    continuum = np.nan_to_num(cube.image[0,:,:])*1000.
     continuum = np.array(rotate(continuum, PA - 90.0, reshape=False))
-
+    
     if j==0:
         star_coordinates = np.where(continuum == np.amax(continuum))
         listofcordinates = list(zip(star_coordinates[0], star_coordinates[1]))
@@ -392,7 +476,11 @@ def star_location(cube, continuum, j, PA=False, condition=False):
 
         plt.figure('continuum')
         plt.clf()
-        plt.imshow(continuum, origin='lower')
+        #plt.imshow(continuum, origin='lower')
+        image = plt.imshow(continuum, origin="lower", cmap=cm.Purples_r)
+        cbar = plt.colorbar(image)
+        cbar.set_label('mJy/beam')
+        
         plt.plot(x_star,y_star, '.', color='red', label=f'(x,y) = ({x_star},{y_star})')
         plt.xlim(0.33*nx, 0.66*nx)
         plt.ylim(0.33*nx, 0.66*nx)
@@ -407,7 +495,10 @@ def star_location(cube, continuum, j, PA=False, condition=False):
 
         plt.figure('continuum')
         plt.clf()
-        plt.imshow(continuum, origin='lower')
+        #plt.imshow(continuum, origin='lower')
+        image = plt.imshow(continuum, origin="lower", cmap=cm.Purples_r)
+        cbar = plt.colorbar(image)
+        cbar.set_label('mJy/beam')
         plt.plot(x_star,y_star, '.', color='red', label=f'(x,y) = ({x_star},{y_star})')
         plt.xlim(0.33*nx, 0.66*nx)
         plt.ylim(0.33*nx, 0.66*nx)
