@@ -94,7 +94,7 @@ class toy_model:
         PA_rad = np.radians(PA)
         cos_PA, sin_PA = np.cos(PA_rad), np.sin(PA_rad)
         x_rot =  x_sky * sin_PA + y_sky * cos_PA
-        y_rot =  x_sky * cos_PA  -y_sky * sin_PA
+        y_rot =  x_sky * cos_PA - y_sky * sin_PA
 
         #-- Deproject for inclination
         return x_rot, y_rot / np.cos(np.radians(inc))
@@ -118,7 +118,7 @@ class toy_model:
         x, y = x_mid, y_mid
         for i in range(n_iter):
             r = np.sqrt(x_mid2 + y**2)
-            z = z_factor * z_func(r) #+ w_func(r, np.arctan2(y, x))
+            z = z_factor * z_fkeyunc(r) #+ w_func(r, np.arctan2(y, x))
             y = y_mid + z * tan_i
 
         return x, y, z

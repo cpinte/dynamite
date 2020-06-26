@@ -48,7 +48,7 @@ def measure_mol_surface(cube, n, x, y, T, inc=None, x_star=None, y_star=None, v_
     r = np.ma.masked_array(r,mask)
     h = np.ma.masked_array(h,mask)
     v = np.ma.masked_array(v,mask)
-    T = np.ma.masked_array(T[:,:,0],mask)
+    T = np.ma.masked_array(T[:,:,1],mask)
 
 
     # -- If the disc rotates in the opposite direction as expected
@@ -58,12 +58,14 @@ def measure_mol_surface(cube, n, x, y, T, inc=None, x_star=None, y_star=None, v_
     plt.figure('height')
     plt.clf()
     plt.scatter(r.ravel(),h.ravel(),alpha=0.2,s=5)
-    plt.show()
 
     plt.figure('velocity')
     plt.clf()
     plt.scatter(r.ravel(),v.ravel(),alpha=0.2,s=5)
-    plt.show()
+
+    plt.figure('Brightness temperature')
+    plt.clf()
+    plt.scatter(r.ravel(),T.ravel(),alpha=0.2,s=5)
 
     #-- Ignoring channels close to systemic velocity
     # change of mind : we do it later
