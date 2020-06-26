@@ -1,6 +1,3 @@
-#HD163 = casa.Cube("/Users/cpinte/Observations/HD163/ALMA/Isella/mine/HD163296_CO_100m.s-1.image.fits.gz")
-#measure_surface(HD163, 61, plot=True, PA=-45,plot_cut=534,sigma=10, y_star=478)
-
 from scipy.ndimage import rotate, shift
 from scipy.interpolate import interp1d
 import scipy.constants as sc
@@ -155,7 +152,7 @@ class Surface(dict):
         return list(self.keys())
 
 
-def detect_surface(cube, PA=None, plot=False, plot_cut=None, sigma=None, y_star=None, win=20):
+def detect_surface(cube, PA=None, plot_cut=None, sigma=None, y_star=None, win=20):
     """
     Infer the upper emission surface from the provided cube
     extract the emission surface in each channel and loop over channels
@@ -187,14 +184,6 @@ def detect_surface(cube, PA=None, plot=False, plot_cut=None, sigma=None, y_star=
         im = np.nan_to_num(cube.image[iv,:,:])
         if PA is not None:
             im = np.array(rotate(im, PA - 90.0, reshape=False))
-
-        # plot channel map as bakcground
-        if plot:
-            #pdf = PdfPages('CO_layers.pdf')
-            plt.figure(win)
-            plt.clf()
-            plt.imshow(im, origin="lower")#, interpolation="bilinear")
-
 
         # Loop over the pixels along the x-axis to find surface
         in_surface = np.full(nx,False)
@@ -299,20 +288,6 @@ def detect_surface(cube, PA=None, plot=False, plot_cut=None, sigma=None, y_star=
                 y_surf[iv,:n,:] = j_surf_exact[in_surface,:]
                 Tb_surf[iv,:n,:] = T_surf[in_surface,:]
 
-                # We plot the detected points
-                if plot:
-                    plt.figure(win)
-                    plt.plot(x_surf,y_surf[:,0],"o",color=surface_color[0],markersize=1)
-                    plt.plot(x_surf,y_surf[:,1],"o",color=surface_color[1],markersize=1)
-                    #plt.plot(x_surf,np.mean(y_surf,axis=1),"o",color="white",markersize=1)
-
-                    # We zoom on the detected surfaces
-                    plt.xlim(np.min(x_surf) - 10*cube.bmaj/cube.pixelscale,np.max(x_surf) + 10*cube.bmaj/cube.pixelscale)
-                    plt.ylim(np.min(y_surf) - 10*cube.bmaj/cube.pixelscale,np.max(y_surf) + 10*cube.bmaj/cube.pixelscale)
-
-                    plt.savefig('layers/channel_'+str(iv+1)+'.png')
-                    plt.close()
-
             #-- test if we have points on both side of the star
             # - remove side with the less points
 
@@ -342,7 +317,6 @@ def plot_surface(cube, n, x, y, Tb, iv, PA=None, win=20):
         # We zoom on the detected surfaces
         plt.xlim(np.min(x[iv,:n[iv]]) - 10*cube.bmaj/cube.pixelscale,np.max(x[iv,:n[iv]]) + 10*cube.bmaj/cube.pixelscale)
         plt.ylim(np.min(y[iv,:n[iv],:]) - 10*cube.bmaj/cube.pixelscale,np.max(y[iv,:n[iv],:]) + 10*cube.bmaj/cube.pixelscale)
-
 
 
 
