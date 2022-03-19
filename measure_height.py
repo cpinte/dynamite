@@ -6,9 +6,10 @@ from matplotlib.backends.backend_pdf import PdfPages
 from scipy.stats import binned_statistic
 
 import matplotlib.pyplot as plt
+
 class Surface:
 
-    def __init__(self, cube=None, PA=None, inc=None, x_star=None, y_star=None, v_syst=None, sigma=10, **kwargs):
+    def __init__(self, cube=None, PA=None, inc=None, x_star=None, y_star=None, v_syst=None, sigma=5, **kwargs):
 
         self.cube = cube
 
@@ -155,6 +156,8 @@ class Surface:
                 # - remove side with the less points
 
         #--  Additional spectral filtering to clean the data
+
+
         self.n_surf = n_surf
         self.x_sky = x_surf
         self.y_sky = y_surf
@@ -221,6 +224,8 @@ class Surface:
 
     def plot_surfaces(self):
 
+        color = np.abs(np.repeat(np.arange(201)[:,np.newaxis],501,axis=1) - 101)
+        color = "black"
         r = self.r
         h = self.h
         v=self.v
@@ -228,15 +233,18 @@ class Surface:
 
         plt.figure('height')
         plt.clf()
-        plt.scatter(r.ravel(),h.ravel(),alpha=0.2,s=5)
+#        plt.scatter(r.ravel(),h.ravel(),alpha=0.2,s=5,c=color.ravel(),cmap="viridis")
+        plt.scatter(r.ravel(),h.ravel(),alpha=0.2,s=5,cmap="viridis")
 
         plt.figure('velocity')
         plt.clf()
-        plt.scatter(r.ravel(),v.ravel(),alpha=0.2,s=5)
+        #plt.scatter(r.ravel(),v.ravel(),alpha=0.2,s=5,c=color.ravel(),cmap="viridis")
+        plt.scatter(r.ravel(),v.ravel(),alpha=0.2,s=5,cmap="viridis")
 
         plt.figure('Brightness temperature')
         plt.clf()
-        plt.scatter(r.ravel(),T.ravel(),alpha=0.2,s=5)
+        #plt.scatter(r.ravel(),T.ravel(),alpha=0.2,s=5,c=color.ravel(),cmap="viridis")
+        plt.scatter(r.ravel(),T.ravel(),alpha=0.2,s=5,cmap="viridis")
 
         #-- Ignoring channels close to systemic velocity
         # change of mind : we do it later
@@ -275,11 +283,12 @@ class Surface:
 
         return
 
-    def plot_channel(iv, win=20):
+    def plot_channel(self,iv, win=20):
 
         cube = self.cube
-        x = self.x
-        y = self.y
+        x = self.x_sky
+        y = self.y_sky
+        n_surf = self.n_surf
 
         im = np.nan_to_num(cube.image[iv,:,:])
         if self.PA is not None:
@@ -289,14 +298,14 @@ class Surface:
         plt.clf()
         plt.imshow(im, origin="lower")#, interpolation="bilinear")
 
-        if self.n[iv]:
-            plt.plot(x[iv,:n[iv]],y[iv,:n[iv],0],"o",color="red",markersize=1)
-            plt.plot(x[iv,:n[iv]],y[iv,:n[iv],1],"o",color="blue",markersize=1)
+        if n_surf[iv]:
+            plt.plot(x[iv,:n_surf[iv]],y[iv,:n_surf[iv],0],"o",color="red",markersize=1)
+            plt.plot(x[iv,:n_surf[iv]],y[iv,:n_surf[iv],1],"o",color="blue",markersize=1)
             #plt.plot(x,np.mean(y,axis=1),"o",color="white",markersize=1)
 
             # We zoom on the detected surfaces
-            plt.xlim(np.min(x[iv,:n[iv]]) - 10*cube.bmaj/cube.pixelscale,np.max(x[iv,:n[iv]]) + 10*cube.bmaj/cube.pixelscale)
-            plt.ylim(np.min(y[iv,:n[iv],:]) - 10*cube.bmaj/cube.pixelscale,np.max(y[iv,:n[iv],:]) + 10*cube.bmaj/cube.pixelscale)
+            plt.xlim(np.min(x[iv,:n_surf[iv]]) - 10*cube.bmaj/cube.pixelscale,np.max(x[iv,:n_surf[iv]]) + 10*cube.bmaj/cube.pixelscale)
+            plt.ylim(np.min(y[iv,:n_surf[iv],:]) - 10*cube.bmaj/cube.pixelscale,np.max(y[iv,:n_surf[iv],:]) + 10*cube.bmaj/cube.pixelscale)
 
 
 def search_maxima(y, threshold=None, dx=0):
