@@ -128,21 +128,23 @@ class Surface:
                 x1 = x[in_surface]
 
                 y1 = np.mean(j_surf_exact[in_surface,:],axis=1)
-                P = np.polyfit(x1,y1,1)
 
-                #x_plot = np.array([0,nx])
-                #plt.plot(x_plot, P[1] + P[0]*x_plot)
+                if (len(x1) > 2):
+                    P = np.polyfit(x1,y1,1)
 
-                #in_surface_tmp = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) # test only front surface
-                in_surface_tmp = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) & (j_surf_exact[:,1] > (P[1] + P[0]*x))
+                    #x_plot = np.array([0,nx])
+                    #plt.plot(x_plot, P[1] + P[0]*x_plot)
 
-                # We remove the weird point and reddo the fit again to ensure the slope we use is not too bad
-                x1 = x[in_surface_tmp]
-                y1 = np.mean(j_surf_exact[in_surface_tmp,:],axis=1)
-                P = np.polyfit(x1,y1,1)
+                    #in_surface_tmp = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) # test only front surface
+                    in_surface_tmp = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) & (j_surf_exact[:,1] > (P[1] + P[0]*x))
 
-                #in_surface = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) # test only front surface
-                in_surface = in_surface & (j_surf_exact[:,0] < (P[1] + P[0]*x)) & (j_surf_exact[:,1] > (P[1] + P[0]*x))
+                    # We remove the weird point and reddo the fit again to ensure the slope we use is not too bad
+                    x1 = x[in_surface_tmp]
+                    y1 = np.mean(j_surf_exact[in_surface_tmp,:],axis=1)
+                    P = np.polyfit(x1,y1,1)
+
+                    #in_surface = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) # test only front surface
+                    in_surface = in_surface & (j_surf_exact[:,0] < (P[1] + P[0]*x)) & (j_surf_exact[:,1] > (P[1] + P[0]*x))
 
                 # Saving the data
                 n = np.sum(in_surface)
