@@ -10,13 +10,23 @@ import matplotlib.pyplot as plt
 class Surface:
 
     def __init__(self, cube=None, PA=None, inc=None, x_star=None, y_star=None, v_syst=None, sigma=5, **kwargs):
+        '''
+        Parameters
+        ----------
+        cube
+            An imgcube instance of the line data.
+        Returns
+        -------
+        detect_surface
+
+        '''
 
         self.cube = cube
 
         self.PA = PA
         self.inc = inc
-        self.x_star = x_star
-        self.y_star = y_star
+        self.x_star = (x_star*np.pi/(180 * 3600))/np.abs(cube.header['CDELT1'])
+        self.y_star = (y_star*np.pi/(180 * 3600))/np.abs(cube.header['CDELT2'])
         self.sigma = sigma
         self.v_syst = v_syst
 
@@ -26,6 +36,7 @@ class Surface:
         return
 
     def _detect_surface(self):
+
         """
         Infer the upper emission surface from the provided cube
         extract the emission surface in each channel and loop over channels
@@ -34,7 +45,7 @@ class Surface:
         cube (casa instance): An imgcube instance of the line data.
 
         PA (float): Position angle of the source in [degrees].
-        y_star (optional) : position of star in  pixel (in rorated image), used to filter some bad data
+        y_star (optional) : position of star in pixel (in rorated image), used to filter some bad data
         without y_star, more points might be rejected
         """
 
