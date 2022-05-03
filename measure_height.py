@@ -34,7 +34,7 @@ class Surface:
         cube (casa instance): An imgcube instance of the line data.
 
         PA (float): Position angle of the source in [degrees].
-        y_star (optional) : position of star in  pixel (in rorated image), used to filter some bad data
+        y_star (optional) : position of star in  pixel (in rotated image), used to filter some bad data
         without y_star, more points might be rejected
         """
 
@@ -158,8 +158,6 @@ class Surface:
                 # - remove side with the less points
 
         #--  Additional spectral filtering to clean the data
-
-
         self.n_surf = n_surf
         self.x_sky = x_surf
         self.y_sky = y_surf
@@ -283,9 +281,12 @@ class Surface:
         plt.figure('Brightness temperature')
         plt.errorbar(bins_T[0,:], bins_T[1,:], yerr=std_T, color="red", marker="o", fmt=' ', markersize=2)
 
-        return
+        return P
 
-    def plot_channel(self,iv, win=20):
+    def plot_channel(self,iv, win=20,ax=None):
+
+        if ax is None:
+            ax = plt.gca()
 
         cube = self.cube
         x = self.x_sky
@@ -296,18 +297,30 @@ class Surface:
         if self.PA is not None:
             im = np.array(rotate(im, self.PA - 90.0, reshape=False))
 
-        plt.figure(win)
-        plt.clf()
-        plt.imshow(im, origin="lower")#, interpolation="bilinear")
+        ax.imshow(im, origin="lower")#, interpolation="bilinear")
 
         if n_surf[iv]:
-            plt.plot(x[iv,:n_surf[iv]],y[iv,:n_surf[iv],0],"o",color="red",markersize=1)
-            plt.plot(x[iv,:n_surf[iv]],y[iv,:n_surf[iv],1],"o",color="blue",markersize=1)
+            ax.plot(x[iv,:n_surf[iv]],y[iv,:n_surf[iv],0],"o",color="red",markersize=1)
+            ax.plot(x[iv,:n_surf[iv]],y[iv,:n_surf[iv],1],"o",color="blue",markersize=1)
             #plt.plot(x,np.mean(y,axis=1),"o",color="white",markersize=1)
 
             # We zoom on the detected surfaces
-            plt.xlim(np.min(x[iv,:n_surf[iv]]) - 10*cube.bmaj/cube.pixelscale,np.max(x[iv,:n_surf[iv]]) + 10*cube.bmaj/cube.pixelscale)
-            plt.ylim(np.min(y[iv,:n_surf[iv],:]) - 10*cube.bmaj/cube.pixelscale,np.max(y[iv,:n_surf[iv],:]) + 10*cube.bmaj/cube.pixelscale)
+            #ax.set_xlim(np.min(x[iv,:n_surf[iv]]) - 10*cube.bmaj/cube.pixelscale,np.max(x[iv,:n_surf[iv]]) + 10*cube.bmaj/cube.pixelscale)
+            #ax.set_ylim(np.min(y[iv,:n_surf[iv],:]) - 10*cube.bmaj/cube.pixelscale,np.max(y[iv,:n_surf[iv],:]) + 10*cube.bmaj/cube.pixelscale)
+
+
+    def plot_channels(self,n=20, win=21):
+
+        nv = self.cube.nv
+        dv = np.floor(nv/n).astype(int)
+
+        ncols=5
+        nrows = np.ceil(n / ncols).astype(int)
+
+        fig, axs = plt.subplots(ncols=5, nrows=nrows, figsize=(11, 2*nrows+1),constrained_layout=True,num=win)
+
+        for i, ax in enumerate(axs.flatten()):
+            self.plot_channel(i*dv,ax=ax)
 
 
 def search_maxima(y, threshold=None, dx=0):
