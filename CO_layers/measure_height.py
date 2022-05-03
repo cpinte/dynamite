@@ -39,7 +39,7 @@ class Surface:
 
         self.cube = cube
 
-        self.PA = PA-180
+        self.PA = PA
         self.inc = inc
 
         self.x_star = (cube.nx/2 +1) - (dRA*np.pi/(180 * 3600))/np.abs(cube.header['CDELT1']*np.pi/180)
