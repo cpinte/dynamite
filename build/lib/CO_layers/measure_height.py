@@ -6,27 +6,45 @@ from matplotlib.backends.backend_pdf import PdfPages
 from scipy.stats import binned_statistic
 
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
+
 
 class Surface:
 
-    def __init__(self, cube=None, PA=None, inc=None, x_star=None, y_star=None, v_syst=None, sigma=5, **kwargs):
+    def __init__(self, cube=None, PA=None, inc=None, dRA=0.0, dDec=0.0, v_syst=None, sigma=5, **kwargs):
         '''
         Parameters
         ----------
         cube
-            An imgcube instance of the line data.
+            Instance of an image cube of the line data.
+        PA
+            Position angle of the source in degrees, measured from east to north.
+        inc
+            Inclination of the source in degrees.
+        dRA
+            offset in arcseconds
+        dDec
+            offset in arcseconds
+        v_syst
+            system velocity in km/s.
+        sigma
+            cutt off threshold to fit surface
+
         Returns
         -------
         detect_surface
 
         '''
 
+
         self.cube = cube
 
-        self.PA = PA
+        self.PA = PA-180
         self.inc = inc
-        self.x_star = (x_star*np.pi/(180 * 3600))/np.abs(cube.header['CDELT1'])
-        self.y_star = (y_star*np.pi/(180 * 3600))/np.abs(cube.header['CDELT2'])
+
+        self.x_star = (cube.nx/2 +1) - (dRA*np.pi/(180 * 3600))/np.abs(cube.header['CDELT1']*np.pi/180)
+        self.y_star = (cube.ny/2 +1) - (dDec*np.pi/(180 * 3600))/np.abs(cube.header['CDELT2']*np.pi/180)
+
         self.sigma = sigma
         self.v_syst = v_syst
 
@@ -237,62 +255,83 @@ class Surface:
 
     def plot_surfaces(self):
 
-        color = np.abs(np.repeat(np.arange(201)[:,np.newaxis],501,axis=1) - 101)
-        color = "black"
         r = self.r
         h = self.h
         v=self.v
         T = np.mean(self.Tb[:,:,:],axis=2)
-
-        plt.figure('height')
-        plt.clf()
-#        plt.scatter(r.ravel(),h.ravel(),alpha=0.2,s=5,c=color.ravel(),cmap="viridis")
-        plt.scatter(r.ravel(),h.ravel(),alpha=0.2,s=5,cmap="viridis")
-
-        plt.figure('velocity')
-        plt.clf()
-        #plt.scatter(r.ravel(),v.ravel(),alpha=0.2,s=5,c=color.ravel(),cmap="viridis")
-        plt.scatter(r.ravel(),v.ravel(),alpha=0.2,s=5,cmap="viridis")
-
-        plt.figure('Brightness temperature')
-        plt.clf()
-        #plt.scatter(r.ravel(),T.ravel(),alpha=0.2,s=5,c=color.ravel(),cmap="viridis")
-        plt.scatter(r.ravel(),T.ravel(),alpha=0.2,s=5,cmap="viridis")
-
-        #-- Ignoring channels close to systemic velocity
-        # change of mind : we do it later
-
-        #-- fitting a power-law
-        P, res_h, _, _, _ = np.ma.polyfit(np.log10(r.ravel()),np.log10(h.ravel()),1, full=True)
-        x = np.linspace(np.min(r),np.max(r),100)
-        plt.figure('height')
-        plt.plot(x, 10**P[1] * x**P[0])
 
         r_data = r.ravel().compressed()#[np.invert(mask.ravel())]
         h_data = h.ravel().compressed()#[np.invert(mask.ravel())]
         v_data = v.ravel().compressed()#[np.invert(mask.ravel())]
         T_data = np.mean(self.Tb[:,:,:],axis=2).ravel()[np.invert(r.mask.ravel())]
 
-        #plt.scatter(r_data,h_data)
+        #-- fitting a power-law
+        P, res_h, _, _, _ = np.ma.polyfit(np.log10(r.ravel()),np.log10(h.ravel()),1, full=True)
+        x = np.linspace(np.min(r),np.max(r),100)
+
+        font=30
+        line_width=3
+
+        fig = plt.figure(figsize=(30,11))
+        gs = fig.add_gridspec(nrows=1,ncols=3)
+        gs.update(wspace=0.2, hspace=0.05)
+        ax=[]
+        for i in range(0,1):
+            for j in range(0,3):
+                ax.append(fig.add_subplot(gs[i,j]))
+
+        #Altitude
+
+        ax[0].scatter(r.ravel(),h.ravel(),alpha=0.5,s=10,color="grey",marker='o')
 
         bins, _, _ = binned_statistic(r_data,[r_data,h_data], bins=30)
         std, _, _  = binned_statistic(r_data,h_data, 'std', bins=30)
 
-        print("STD =", np.median(std))
-        plt.errorbar(bins[0,:], bins[1,:],yerr=std, color="red")
+        ax[0].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="red", fmt='o', mec='k', mfc='red', ms=10, elinewidth=2)
 
-        bins_v, _, _ = binned_statistic(r_data,[r_data,v_data], bins=30)
-        std_v, _, _  = binned_statistic(r_data,v_data, 'std', bins=30)
+        ax[0].plot(x, 10**P[1] * x**P[0], color='k', ls='--', alpha=0.75, lw=line_width)
 
-        print("STD =", np.median(std_v))  # min seems a better estimate for x_star than std_h
-        plt.figure('velocity')
-        plt.errorbar(bins_v[0,:], bins_v[1,:], yerr=std_v, color="red", marker="o", fmt=' ', markersize=2)
 
-        bins_T, _, _ = binned_statistic(r_data,[r_data,T_data], bins=30)
-        std_T, _, _  = binned_statistic(r_data,T_data, 'std', bins=30)
+        #Velocity
+        ax[1].scatter(r.ravel(),v.ravel(),alpha=0.5,s=10,color="grey",marker='o')
 
-        plt.figure('Brightness temperature')
-        plt.errorbar(bins_T[0,:], bins_T[1,:], yerr=std_T, color="red", marker="o", fmt=' ', markersize=2)
+        bins, _, _ = binned_statistic(r_data,[r_data,v_data], bins=30)
+        std, _, _  = binned_statistic(r_data,v_data, 'std', bins=30)
+
+        ax[1].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="red", fmt='o', mec='k', mfc='red', ms=10, elinewidth=2)
+
+
+        #Temperature
+
+        ax[2].scatter(r.ravel(),T.ravel(),alpha=0.5,s=10,color="grey",marker='o')
+
+        bins, _, _ = binned_statistic(r_data,[r_data,T_data], bins=30)
+        std, _, _  = binned_statistic(r_data,T_data, 'std', bins=30)
+
+        ax[2].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="red", fmt='o', mec='k', mfc='red', ms=10, elinewidth=2)
+
+        ax[0].set_ylabel('Height (")', fontsize=font)
+        ax[1].set_ylabel('Velocity (km/s)', fontsize=font)
+        ax[2].set_ylabel('Brightness Temperature (K)', fontsize=font)
+
+        ax[0].set_xlabel('Radius (")', fontsize=font)
+        ax[1].set_xlabel('Radius (")', fontsize=font)
+        ax[2].set_xlabel('Radius (")', fontsize=font)
+
+        ax[0].tick_params(axis='both', direction='out', labelbottom=True, labelleft=True, top=False, right=False, width=3, length=8 ,labelsize=font-10)
+        ax[1].tick_params(axis='both', direction='out', labelbottom=True, labelleft=True, top=False, right=False, width=3, length=8 ,labelsize=font-10)
+        ax[2].tick_params(axis='both', direction='out', labelbottom=True, labelleft=True, top=False, right=False, width=3, length=8 ,labelsize=font-10)
+
+
+        #Adding hard outline
+        bar_size = 3
+        c ="black"
+        for i, axes in enumerate(ax):   
+            ax[i].axhline(linewidth=bar_size, y=ax[i].get_ylim()[0], color=c)
+            ax[i].axvline(linewidth=bar_size, x=ax[i].get_xlim()[0], color=c)
+            ax[i].axhline(linewidth=bar_size, y=ax[i].get_ylim()[1], color=c)
+            ax[i].axvline(linewidth=bar_size, x=ax[i].get_xlim()[1], color=c)
+             
 
         return
 
@@ -320,6 +359,50 @@ class Surface:
             plt.xlim(np.min(x[iv,:n_surf[iv]]) - 10*cube.bmaj/cube.pixelscale,np.max(x[iv,:n_surf[iv]]) + 10*cube.bmaj/cube.pixelscale)
             plt.ylim(np.min(y[iv,:n_surf[iv],:]) - 10*cube.bmaj/cube.pixelscale,np.max(y[iv,:n_surf[iv],:]) + 10*cube.bmaj/cube.pixelscale)
 
+    def plot_channels(self):
+
+        #plotting all fitted channels
+        #can probably make this better
+
+        cube = self.cube
+        x = self.x_sky
+        y = self.y_sky
+        n_surf = self.n_surf
+
+        velax = cube.image[:,:,:]
+        velocities = velax.shape[0]
+  
+        nrows = np.ceil(len(n_surf[n_surf>0]) / 5).astype(int)
+
+        fig, ax = plt.subplots(ncols=5, nrows=nrows, figsize=(11, 2*nrows+1),
+            constrained_layout=True)
+
+        i = 0
+        ax = ax.flatten()
+        for iv in range(velocities):
+
+            if n_surf[iv]>0:
+                
+                im = np.nan_to_num(cube.image[iv,:,:])
+                if self.PA is not None:
+                    im = np.array(rotate(im, self.PA - 90.0, reshape=False))
+
+                ax[i].imshow(im, origin='lower', cmap='binary_r', vmin=0.0, vmax=0.75*im.max())
+
+                ax[i].plot(x[iv,:n_surf[iv]],y[iv,:n_surf[iv],0],"o",color="red",markersize=1)
+                ax[i].plot(x[iv,:n_surf[iv]],y[iv,:n_surf[iv],1],"o",color="blue",markersize=1)
+
+                ax[i].xaxis.set_major_locator(MaxNLocator(5))
+                ax[i].yaxis.set_major_locator(MaxNLocator(5))
+                ax[i].grid(ls='--', lw=1.0, alpha=0.2)
+                try:
+                    ax[i].set_xlim(np.min(x[iv,:n_surf[iv]]) - 10*cube.bmaj/cube.pixelscale,np.max(x[iv,:n_surf[iv]]) + 10*cube.bmaj/cube.pixelscale)
+                    ax[i].set_ylim(np.min(y[iv,:n_surf[iv],:]) - 10*cube.bmaj/cube.pixelscale,np.max(y[iv,:n_surf[iv],:]) + 10*cube.bmaj/cube.pixelscale)
+                    ax[i].tick_params(axis='both', direction='out', labelbottom=False, labelleft=False)
+                except ValueError:  #raised if `y` is empty.
+                    pass
+
+                i = i+1
 
 def search_maxima(y, threshold=None, dx=0):
     """
