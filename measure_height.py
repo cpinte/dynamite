@@ -1,17 +1,26 @@
-from scipy.ndimage import rotate, shift
+from scipy import ndimage
+from scipy.ndimage import rotate
 from scipy.interpolate import interp1d
 import scipy.constants as sc
 import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
 from scipy.stats import binned_statistic
+import matplotlib.gridspec as gridspec
+from matplotlib.patches import Ellipse
+from matplotlib.colors import LogNorm, PowerNorm
 
 import matplotlib.pyplot as plt
 import bettermoments as bm
 import my_casa_cube as casa
+import os
+import sys
+import cmocean as cmo
+import cmasher as cmr
+import matplotlib.cm as cm
 
 class Surface:
 
-    def __init__(self, cube=None, PA=None, inc=None, x_c=None, y_c=None, v_syst=None, sigma=5, **kwargs):
+    def __init__(self, cube=None, PA=None, inc=None, x_c=None, y_c=None, v_syst=None, sigma=8, **kwargs):
 
         self.cube = cube
 
@@ -25,13 +34,15 @@ class Surface:
         if not os.path.exists(str(cube.filename.replace(".fits","_gv0.fits"))):
             self._compute_velocity_fields()
         else:
-            path = self.filename
-            data_bm, velax_bm = bm.load_cube(path)
-            rms = bm.estimate_RMS(data=data_bm, N=1)
+            path = self.cube.filename
+            bm_data, bm_velax = bm.load_cube(path)
+            rms = bm.estimate_RMS(data=bm_data, N=1)
+            self.rms = rms
+            print("rms =",rms)
         
         self._detect_surface()
-        self._compute_surface()
-        self._plot_mol_surface()
+        #self._compute_surface()
+        #self._plot_mol_surface()
         self._plot_traced_channels()
 
         return
@@ -43,11 +54,19 @@ class Surface:
         """
 
         path = self.cube.filename
-        data_bm, velax_bm = bm.load_cube(path)
+        bm_data, bm_velax = bm.load_cube(path)
 
-        rms = bm.estimate_RMS(data=data_bm, N=1)
+        rms = bm.estimate_RMS(data=bm_data, N=1)
+
+        user_mask = bm.get_user_mask(data=bm_data, user_mask_path=None)
+        threshold_mask = bm.get_threshold_mask(data=bm_data, clip=3.0)
+        channel_mask = bm.get_channel_mask(data=bm_data, firstchannel=75, lastchannel=278)
+
+        mask = bm.get_combined_mask(user_mask=user_mask, threshold_mask=threshold_mask, channel_mask=channel_mask, combine='and')
+
+        masked_bm_data = bm_data * mask 
         
-        moments = bm.collapse_gaussian(velax=bm_velax, data=bm_data, rms=rms)
+        moments = bm.collapse_gaussian(velax=bm_velax, data=masked_bm_data, rms=rms)
 
         bm.save_to_FITS(moments=moments, method='gaussian', path=path)
 
@@ -67,22 +86,21 @@ class Surface:
         without y_star, more points might be rejected
         """
 
-        # line cube
-        cube = self.cube
-
         # parameters
-        nx, nv = cube.nx, cube.nv
-        dv = round(cube.velocity[1]-cube.velocity[0], 2)
+        nx, nv, ny = self.cube.nx, self.cube.nv, self.cube.ny
+        v = self.cube.velocity[:,np.newaxis]
+        dv = round(self.cube.velocity[1]-self.cube.velocity[0], 3)
+        print("spectral res. =",dv)
 
         # setting up arrays
         x_surf = np.zeros([nv,nx])
         y_surf = np.zeros([nv,nx,2])
-        Tb_surf = np.zeros([nv,nx,2])
+        Bv_surf = np.zeros([nv,nx,2])
 
         # load in velocity map
-        mom9 = casa.Cube(str(cube.filename.replace(".fits","_gv0.fits")))
-        mom9_im = np.nan_to_num(mom9.image[:,:])
-        mom9_im_rot = rotate_disc(mom9_im, PA=self.PA, x_c=self.x_c, y_c=self.y_c) 
+        vfields = casa.Cube(self.cube.filename.replace(".fits","_gv0.fits"))
+        vfields_im = np.nan_to_num(vfields.image[:,:])
+        vfields_im_rot = rotate_disc(vfields_im, PA=self.PA, x_c=self.x_c, y_c=self.y_c)
 
         # Loop over the channels
         for iv in range(nv):
@@ -90,7 +108,7 @@ class Surface:
             print(iv,"/",nv-1, v[iv][0])
             
             # rotate the image so major axis is aligned with x-axis.
-            im = np.nan_to_num(cube.image[iv,:,:])
+            im = np.nan_to_num(self.cube.image[iv,:,:])
             im_rot = rotate_disc(im, PA=self.PA, x_c=self.x_c, y_c=self.y_c)
 
             # setting up arrays in each channel
@@ -103,10 +121,10 @@ class Surface:
             for i in range(nx):
 
                 vert_profile = im_rot[:,i]
-                mom9_profile = mom9_im_rot[:,i]
+                vfields_profile = vfields_im_rot[:,i] / 1.e3  #add a check for units and convert if necessary.
             
                 # finding the flux maxima for each slice in the x-axis
-                local_max, mom9_coords = search_maxima(vert_profile, mom9_profile, v=v[iv][0], dv=dv, y_c=self.y_c, threshold=self.sigma*self.rms, dx=cube.bmaj/cube.pixelscale)
+                local_max, mom9_coords = search_maxima(vert_profile, vfields_profile, v=v[iv][0], dv=dv, y_c=self.y_c, threshold=self.sigma*self.rms, dx=self.cube.bmaj/self.cube.pixelscale)
 
                 # require a minimum of 2 points; to identify surfaces above and below the star
                 if len(local_max) > 1:
@@ -152,15 +170,15 @@ class Surface:
         inc_rad = np.radians(self.inc)
 
         # y-coordinates for surfaces vertically above and below disc centre in sky coordinates
-        y_a = y_surf[:,:,1] - y_c
-        y_b = y_surf[:,:,0] - y_c
+        y_a = self.y_surf[:,:,1] - self.y_c
+        y_b = self.y_surf[:,:,0] - self.y_c
 
         # determining which surface (top/bottom) is the near/far side.
-        y_mean = np.mean(y_surf[:,:,:], axis=2) - y_c
+        y_mean = np.mean(self.y_surf[:,:,:], axis=2) - self.y_c
         mask = (y_mean == 0)    # removing x coordinates with no traced points.
         y_mean_masked = np.ma.masked_array(y_mean, mask).compressed()
         
-        if (len(np.where(y_mean_masked.ravel() < y_c)[0]) > 0.5*len(y_mean_masked.ravel())):
+        if (len(np.where(y_mean_masked.ravel() < self.y_c)[0]) > 0.5*len(y_mean_masked.ravel())):
             factor = 0
         else:
             factor = 1
@@ -206,26 +224,29 @@ class Surface:
         bins = 70
         plot = ['h', 'v', 'Tb']
         units = ['[arcsec]', '[km/s]', '[K]']
-        var = [h, v, Tb]
+        var = [self.h, self.v, self.Tb]
         stat = ['mean', 'mean', 'max']
-        ax = [ax1, ax2, ax3]
 
         freq = str(round(self.cube.restfreq/1.e9))
         source = self.cube.object
         location = os.path.dirname(os.path.realpath(self.cube.filename))
         
         for k in range(3):
+
+            fig = plt.figure(figsize=(6,6))
+            gs = gridspec.GridSpec(1,1)
+            ax = plt.subplot(gs[0])
             
-            data,_,_ = binned_statistic(r, [r, var[k]], statistic=stat[k], bins=bins)
-            std,_,_ = binned_statistic(r, var[k], statistic='std', bins=bins)
+            data,_,_ = binned_statistic(self.r, [self.r, var[k]], statistic=stat[k], bins=bins)
+            std,_,_ = binned_statistic(self.r, var[k], statistic='std', bins=bins)
 
-            ax[k].scatter(data[0,:], data[1,:], alpha=0.7, s=5, label=isotope)
-            ax[k].errorbar(data[0,:], data[1,:], yerr=std, ls='none')
+            ax.scatter(data[0,:], data[1,:], alpha=0.7, s=5, label=isotope)
+            ax.errorbar(data[0,:], data[1,:], yerr=std, ls='none')
 
-            ax[k].set_xlabel('r [arcsec]')
-            ax[k].set_ylabel(plot[k]+units[k])
+            ax.set_xlabel('r [arcsec]')
+            ax.set_ylabel(plot[k]+units[k])
 
-            np.savetxt(location+'/'+source+'_'+freq+'_surface_params.txt', np.column_stack([r, h, v, Tb]))
+            np.savetxt(location+'/'+source+'_'+freq+'_surface_params.txt', np.column_stack([self.r, self.h, self.v, self.Tb]))
 
             plt.savefig(location+'/'+source+'_'+freq+'_plot[k]_vs_r.pdf', bbox_inches='tight')
 
@@ -243,13 +264,14 @@ class Surface:
         y_arc = (self.y_surf - ((self.cube.ny - 1) / 2)) * self.cube.pixelscale
 
         # converting star location from pixels to arcseconds
-        xc_arc = -(self.x_c - ((self.cube.nx - 1) / 2)) * self.cube.pixelscale
-        yc_arc = (self.y_c - ((self.cube.ny - 1) / 2)) * self.cube.pixelscale
+        xc_arc, yc_arc, extent = self.cube._arcsec_coords(xc=self.x_c, yc=self.y_c)
+        #xc_arc = -(self.x_c - ((self.cube.nx - 1) / 2)) * self.cube.pixelscale
+        #yc_arc = (self.y_c - ((self.cube.ny - 1) / 2)) * self.cube.pixelscale
         
         ############
         nv = self.cube.nv
 
-        norm = PowerNorm(1, vmin=0, vmax=np.max(self.cube._Jybeam_to_Tb(np.nan_to_num(data.image[:,:,:]))))
+        norm = PowerNorm(1, vmin=0, vmax=np.max(self.cube._Jybeam_to_Tb(np.nan_to_num(self.cube.image[:,:,:]))))
         cmap = cmo.cm.rain
 
         freq = str(round(self.cube.restfreq/1.e9))
@@ -268,7 +290,7 @@ class Surface:
 
             im = rotate_disc(im_K, PA=self.PA, x_c=self.x_c, y_c=self.y_c) 
 
-            image = ax.imshow(im, origin='lower', cmap=cmap, norm=norm, extent=self.cube.extent - np.asarray([xc_arc,xc_arc,yc_arc,yc_arc]))
+            image = ax.imshow(im, origin='lower', cmap=cmap, norm=norm, extent=extent)
 
             # adding marker for disc centre
             ax.plot(xc_arc, yc_arc, '+', color='white')
@@ -278,20 +300,28 @@ class Surface:
             ax.plot(x_arc[iv,:],y_arc[iv,:,1], '.', markersize=2, color='white')
 
             # zooming in on the surface
-            plt.xlim(np.min(x_arc[iv]) - 0.2*(abs(np.min(x_arc[iv]) - self.x_c)), np.max(x_arc[iv]) + 0.2*(abs(np.max(x_arc[iv]) - self.x_c)))
-            plt.ylim(np.min(y_arc[iv]) - 0.2*(abs(np.min(y_arc[iv]) - self.y_c)), np.max(y_arc[iv]) + 0.2*(abs(np.max(y_arc[iv]) - self.y_c)))
-    
+            '''
+            # to be updated
+            
+            xmin = np.min(np.min(x_arc[iv]) - 0.2*(abs(np.min(x_arc[iv]) - self.x_c)), extent[3])
+            xmax = np.max(np.max(x_arc[iv]) + 0.2*(abs(np.max(x_arc[iv]) - self.x_c)), extent[1])
+            ymin = np.max(np.min(y_arc[iv]) - 0.2*(abs(np.min(y_arc[iv]) - self.y_c)), extent[2])
+            ymax = np.min(np.max(y_arc[iv]) + 0.2*(abs(np.max(y_arc[iv]) - self.y_c)), extent[0])
+            
+            plt.xlim(xmin, xmax)
+            plt.ylim(ymin, ymax)
+            
             # adding beam
             ax = plt.gca()
-            beam = Ellipse(xy=(np.max(x_arc[iv]) + 0.17*(abs(np.max(x_arc[iv]) - self.x_c)),np.min(y_arc[iv]) - 0.17*(abs(np.min(y_arc[iv]) - self.y_c))), width=self.cube.bmin, height=self.cube.bmaj, angle=-self.cube.bpa, fill=True, color='white')
+            beam = Ellipse(xy=(xmin + 0.1*abs(xmax-xmin), ymax - 0.1*abs(ymax-ymin)), width=self.cube.bmin, height=self.cube.bmaj, angle=-self.cube.bpa, fill=True, color='white')
             ax.add_patch(beam)
-
+            '''
             plt.savefig(location+'/'+source+'_layers/'+source+'_'+freq+'_channel_'+str(iv)+'.pdf', bbox_inches='tight')
 
             plt.close()
 
 
-def search_maxima(yprofile, velprofile, v=None, dv=dv, y_c=None, threshold=None, dx=0):
+def search_maxima(yprofile, velprofile, v=None, dv=None, y_c=None, threshold=None, dx=0):
 
     # find local maxima
     v += dv/2
@@ -337,43 +367,7 @@ def search_maxima(yprofile, velprofile, v=None, dv=dv, y_c=None, threshold=None,
         ycoords = []
     
     return ycoords, vel_coords
-
-
-'''
-def search_maxima(y, threshold=None, dx=0):
-    """
-    Returns the indices of the maxima of a function
-    Indices are sorted by decreasing values of the maxima
-
-    Args:
-         y : array where to search for maxima
-         threshold : minimum value of y for a maximum to be detected
-         dx : minimum spacing between maxima [in pixel]
-    """
-
-    # A maxima is a positive dy followed by a negative dy
-    dy = y[1:] - y[:-1]
-    i_max = np.where((np.hstack((0, dy)) > 0) & (np.hstack((dy, 0)) < 0))[0]
-
-    if threshold:
-        i_max = i_max[np.where(y[i_max]>threshold)]
-
-    # Sort the peaks by height
-    i_max = i_max[np.argsort(y[i_max])][::-1]
-
-    # detect small maxima closer than minimum distance dx from a higher maximum
-    if i_max.size:
-        if dx > 1:
-            flag_remove = np.zeros(i_max.size, dtype=bool)
-            for i in range(i_max.size):
-                if not flag_remove[i]:
-                    flag_remove = flag_remove | (i_max >= i_max[i] - dx) & (i_max <= i_max[i] + dx)
-                    flag_remove[i] = False # Keep current max
-                    # remove the unwanted maxima
-            i_max = i_max[~flag_remove]
-
-    return i_max
-'''
+    
 
 def rotate_disc(channel, PA=None, x_c=None, y_c=None):
 
