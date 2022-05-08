@@ -277,48 +277,50 @@ class Surface:
         freq = str(round(self.cube.restfreq/1.e9))
         source = self.cube.object
         location = os.path.dirname(os.path.realpath(self.cube.filename))
-        if not os.path.exists(location+'/'+source+'_layers/'):
-            os.mkdir(location+'/'+source+'_layers/')
-        
-        for iv in range(nv):
-
-            fig = plt.figure(figsize=(6,6))
-            gs = gridspec.GridSpec(1,1)
-            ax = plt.subplot(gs[0])
-                     
-            im_K = self.cube._Jybeam_to_Tb(np.nan_to_num(self.cube.image[iv,:,:]))
-
-            im = rotate_disc(im_K, PA=self.PA, x_c=self.x_c, y_c=self.y_c) 
-
-            image = ax.imshow(im, origin='lower', cmap=cmap, norm=norm, extent=extent)
-
-            # adding marker for disc centre
-            ax.plot(xc_arc, yc_arc, '+', color='white')
-
-            ## adding trace points                
-            ax.plot(x_arc[iv,:],y_arc[iv,:,0], '.', markersize=2, color='white')
-            ax.plot(x_arc[iv,:],y_arc[iv,:,1], '.', markersize=2, color='white')
-
-            # zooming in on the surface
-            '''
-            # to be updated
+        output = location+'/'+source+'_'+freq+'GHz_layers.pdf'
+        if os.path.exists(output):
+            os.system('rm -rf output')
             
-            xmin = np.min(np.min(x_arc[iv]) - 0.2*(abs(np.min(x_arc[iv]) - self.x_c)), extent[3])
-            xmax = np.max(np.max(x_arc[iv]) + 0.2*(abs(np.max(x_arc[iv]) - self.x_c)), extent[1])
-            ymin = np.max(np.min(y_arc[iv]) - 0.2*(abs(np.min(y_arc[iv]) - self.y_c)), extent[2])
-            ymax = np.min(np.max(y_arc[iv]) + 0.2*(abs(np.max(y_arc[iv]) - self.y_c)), extent[0])
-            
-            plt.xlim(xmin, xmax)
-            plt.ylim(ymin, ymax)
-            
-            # adding beam
-            ax = plt.gca()
-            beam = Ellipse(xy=(xmin + 0.1*abs(xmax-xmin), ymax - 0.1*abs(ymax-ymin)), width=self.cube.bmin, height=self.cube.bmaj, angle=-self.cube.bpa, fill=True, color='white')
-            ax.add_patch(beam)
-            '''
-            plt.savefig(location+'/'+source+'_layers/'+source+'_'+freq+'_channel_'+str(iv)+'.pdf', bbox_inches='tight')
+        with PdfPages(output) as pdf:
+            for iv in range(nv):
 
-            plt.close()
+                fig = plt.figure(figsize=(6,6))
+                gs = gridspec.GridSpec(1,1)
+                ax = plt.subplot(gs[0])
+                
+                im_K = self.cube._Jybeam_to_Tb(np.nan_to_num(self.cube.image[iv,:,:]))
+
+                im = rotate_disc(im_K, PA=self.PA, x_c=self.x_c, y_c=self.y_c) 
+
+                image = ax.imshow(im, origin='lower', cmap=cmap, norm=norm, extent=extent)
+
+                # adding marker for disc centre
+                ax.plot(xc_arc, yc_arc, '+', color='white')
+
+                ## adding trace points                
+                ax.plot(x_arc[iv,:],y_arc[iv,:,0], '.', markersize=2, color='white')
+                ax.plot(x_arc[iv,:],y_arc[iv,:,1], '.', markersize=2, color='white')
+
+                # zooming in on the surface
+                '''
+                # to be updated
+            
+                xmin = np.min(np.min(x_arc[iv]) - 0.2*(abs(np.min(x_arc[iv]) - self.x_c)), extent[3])
+                xmax = np.max(np.max(x_arc[iv]) + 0.2*(abs(np.max(x_arc[iv]) - self.x_c)), extent[1])
+                ymin = np.max(np.min(y_arc[iv]) - 0.2*(abs(np.min(y_arc[iv]) - self.y_c)), extent[2])
+                ymax = np.min(np.max(y_arc[iv]) + 0.2*(abs(np.max(y_arc[iv]) - self.y_c)), extent[0])
+            
+                plt.xlim(xmin, xmax)
+                plt.ylim(ymin, ymax)
+            
+                # adding beam
+                ax = plt.gca()
+                beam = Ellipse(xy=(xmin + 0.1*abs(xmax-xmin), ymax - 0.1*abs(ymax-ymin)), width=self.cube.bmin, height=self.cube.bmaj, angle=-self.cube.bpa, fill=True, color='white')
+                ax.add_patch(beam)
+                '''
+
+                pdf.savefig(bbox_inches='tight')
+                plt.close()
 
 
 def search_maxima(yprofile, velprofile, v=None, dv=None, y_c=None, threshold=None, dx=0):
