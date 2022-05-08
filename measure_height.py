@@ -41,9 +41,9 @@ class Surface:
             print("rms =",rms)
         
         self._detect_surface()
-        #self._compute_surface()
-        #self._plot_mol_surface()
         self._plot_traced_channels()
+        self._compute_surface()
+        self._plot_mol_surface()
 
         return
     
@@ -199,17 +199,25 @@ class Surface:
         # computing velocity and brightness profile
         v = (self.cube.velocity[:,np.newaxis] - self.v_syst) * r / ((self.x_surf - self.x_c) * np.sin(inc_rad))
         Bv = np.mean(self.Bv_surf[:,:,:], axis=2)
-        # check is the disc is rotating in the opposite direction
-        if (np.mean(v) < 0):
-            v *= -1
 
         # masking invalid points
-        mask1 = np.isinf(v) | np.isnan(v) | (h<0) | (v<0)
+        mask1 = np.isinf(v) | np.isnan(v) | (h<0)
 
         r = np.ma.masked_array(r,mask1).compressed()
         h = np.ma.masked_array(h,mask1).compressed()
         v = np.ma.masked_array(v,mask1).compressed()
         Bv = np.ma.masked_array(Bv,mask1).compressed()
+
+        # check is the disc is rotating in the opposite direction
+        if (np.mean(v) < 0):
+            v = -v 
+
+        mask2 = (v<0)
+
+        r = np.ma.masked_array(r,mask2).compressed()
+        h = np.ma.masked_array(h,mask2).compressed()
+        v = np.ma.masked_array(v,mask2).compressed()
+        Bv = np.ma.masked_array(Bv,mask2).compressed()
 
         # compute brightness temperature
         Tb = self.cube._Jybeam_to_Tb(Bv)
@@ -221,7 +229,11 @@ class Surface:
 
 
     def _plot_mol_surface(self):
-        bins = 70
+        """
+        Plotting surfaces
+        """
+        
+        bins = 100
         plot = ['h', 'v', 'Tb']
         units = ['[arcsec]', '[km/s]', '[K]']
         var = [self.h, self.v, self.Tb]
@@ -230,27 +242,32 @@ class Surface:
         freq = str(round(self.cube.restfreq/1.e9))
         source = self.cube.object
         location = os.path.dirname(os.path.realpath(self.cube.filename))
-        
-        for k in range(3):
+        output = location+'/'+source+'_'+freq+'GHz_surfaces.pdf'
+        if os.path.exists(output):
+            os.system('rm -rf output')
 
-            fig = plt.figure(figsize=(6,6))
-            gs = gridspec.GridSpec(1,1)
-            ax = plt.subplot(gs[0])
+        # saving traces
+        np.savetxt(location+'/'+source+'_'+freq+'GHz_surface_params.txt', np.column_stack([self.r, self.h, self.v, self.Tb]))
+
+        # plotting surfaces
+        with PdfPages(output) as pdf:
+            for k in range(3):
+
+                fig = plt.figure(figsize=(6,6))
+                gs = gridspec.GridSpec(1,1)
+                ax = plt.subplot(gs[0])
             
-            data,_,_ = binned_statistic(self.r, [self.r, var[k]], statistic=stat[k], bins=bins)
-            std,_,_ = binned_statistic(self.r, var[k], statistic='std', bins=bins)
+                data,_,_ = binned_statistic(self.r, [self.r, var[k]], statistic=stat[k], bins=bins)
+                std,_,_ = binned_statistic(self.r, var[k], statistic='std', bins=bins)
 
-            ax.scatter(data[0,:], data[1,:], alpha=0.7, s=5, label=isotope)
-            ax.errorbar(data[0,:], data[1,:], yerr=std, ls='none')
+                ax.scatter(data[0,:], data[1,:], alpha=0.7, s=5)
+                ax.errorbar(data[0,:], data[1,:], yerr=std, ls='none')
 
-            ax.set_xlabel('r [arcsec]')
-            ax.set_ylabel(plot[k]+units[k])
-
-            np.savetxt(location+'/'+source+'_'+freq+'_surface_params.txt', np.column_stack([self.r, self.h, self.v, self.Tb]))
-
-            plt.savefig(location+'/'+source+'_'+freq+'_plot[k]_vs_r.pdf', bbox_inches='tight')
-
-            plt.close()
+                ax.set_xlabel('r [arcsec]')
+                ax.set_ylabel(plot[k]+units[k])
+                
+                pdf.savefig(bbox_inches='tight')
+                plt.close()
             
 
     def _plot_traced_channels(self):
