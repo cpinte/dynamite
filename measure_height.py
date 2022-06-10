@@ -31,21 +31,24 @@ class Surface:
         self.v_syst = v_syst
 
         if not os.path.exists(str(cube.filename.replace(".fits",".mom9.fits"))):
-            cube = np.copy(self.image)
-            dv = np.abs(self.velocity[1] - self.velocity[0])
+            im_3D = np.copy(self.cube.image)
+            dv = np.abs(self.cube.velocity[1] - self.cube.velocity[0])
 
-            x_rms = self.cube.nx * 0.25
-            y_rms = self.cube.ny * 0.25
-            rms = np.nanstd(cube.image[0,:x_rms,:y_rms])
+            #x_rms = self.cube.nx * 0.25
+            #y_rms = self.cube.ny * 0.25
+            rms = np.nanstd(self.cube.image[0,:,:])
             self.rms = rms
 
-            M = self.velocity[0] - dv * np.argmax(cube, axis=0)
-            M = np.ma.masked_where(M < self.sigma*self.rms, M)
+            M8 = np.max(im_3D, axis=0)
+            M9 = self.cube.velocity[0] - dv * np.argmax(im_3D, axis=0)
+            M9 = np.ma.masked_where(M8 < self.sigma*self.rms, M9)
+            self.M9 = M9
+            #plt.imshow(M, origin='lower', vmin=np.min(M), vmax=np.max(M), cmap=cm.seismic)
+            #plt.colorbar()
+            #plt.show()
+            #sys.exit()
         else:
-            rms = np.nanstd(self.cube.image[:,:,:])
-            #path = self.cube.filename
-            #bm_data, bm_velax = bm.load_cube(path)
-            #rms = bm.estimate_RMS(data=bm_data, N=1)
+            rms = np.nanstd(self.cube.image[0,:,:])
             self.rms = rms
             print("rms =",rms)
         
@@ -60,31 +63,6 @@ class Surface:
         #self._plot_mol_surface()
 
         return
-    
-
-    def _compute_velocity_fields(self):
-        """
-        For computing the line of sight velocity fields using the bettermoments package
-        """
-
-        path = self.cube.filename
-        bm_data, bm_velax = bm.load_cube(path)
-
-        rms = bm.estimate_RMS(data=bm_data, N=1)
-
-        user_mask = bm.get_user_mask(data=bm_data, user_mask_path=None)
-        threshold_mask = bm.get_threshold_mask(data=bm_data, clip=3.0)
-        channel_mask = bm.get_channel_mask(data=bm_data, firstchannel=75, lastchannel=278)
-
-        mask = bm.get_combined_mask(user_mask=user_mask, threshold_mask=threshold_mask, channel_mask=channel_mask, combine='and')
-
-        masked_bm_data = bm_data * mask 
-        
-        moments = bm.collapse_gaussian(velax=bm_velax, data=masked_bm_data, rms=rms)
-
-        bm.save_to_FITS(moments=moments, method='gaussian', path=path)
-
-        self.rms = rms
         
         
     def _detect_surface(self):
@@ -103,7 +81,7 @@ class Surface:
         # parameters
         nx, nv, ny = self.cube.nx, self.cube.nv, self.cube.ny
         v = self.cube.velocity[:,np.newaxis]
-        dv = np.abs(self.velocity[1] - self.velocity[0])
+        dv = np.abs(self.cube.velocity[1] - self.cube.velocity[0])
         #dv = round(self.cube.velocity[1]-self.cube.velocity[0], 3)
         print("spectral res. =",dv)
 
@@ -113,15 +91,16 @@ class Surface:
         Bv_surf = np.zeros([nv,nx,2])
 
         # load in velocity map
-        vfields = casa.Cube(self.cube.filename.replace(".fits",".mom9.fits"))
+        vfields_im = np.nan_to_num(self.M9)
+        #vfields = casa.Cube(self.cube.filename.replace(".fits",".mom9.fits"))
         #vfields_im = np.nan_to_num(vfields.image[:,:])
-        vfields_im = np.nan_to_num(vfields.image[0,:,:])
+        #vfields_im = np.nan_to_num(vfields.image[0,:,:])
         vfields_im_rot = rotate_disc(vfields_im, PA=self.PA, x_c=self.x_c, y_c=self.y_c)
         
         # Loop over the channels
         for iv in range(nv):
             
-            print(iv,"/",nv-1, v[iv][0])
+            #print(iv,"/",nv-1, v[iv][0])
          
             # rotate the image so major axis is aligned with x-axis.
             im = np.nan_to_num(self.cube.image[iv,:,:])
@@ -306,10 +285,10 @@ class Surface:
         #yc_arc = (self.y_c - ((self.cube.ny - 1) / 2)) * self.cube.pixelscale
         
         # finding plotting limits
-        xmin = np.max([np.nanmin(x_arc[:,:]) - 0.2*(abs(np.nanmin(x_arc[:,:]) - xc_arc)), extent[1]])
-        xmax = np.min([np.nanmax(x_arc[:,:]) + 0.2*(abs(np.nanmax(x_arc[:,:]) - xc_arc)), extent[0]])
-        ymin = np.max([np.nanmin(y_arc[:,:,0]) - 0.2*(abs(np.nanmin(y_arc[:,:,0]) - yc_arc)), extent[2]])
-        ymax = np.min([np.nanmax(y_arc[:,:,1]) + 0.2*(abs(np.nanmax(y_arc[:,:,1]) - yc_arc)), extent[3]])
+        xmin = np.nanmax([np.nanmin(x_arc[:,:]) - 0.2*(abs(np.nanmin(x_arc[:,:]) - xc_arc)), extent[1]])
+        xmax = np.nanmin([np.nanmax(x_arc[:,:]) + 0.2*(abs(np.nanmax(x_arc[:,:]) - xc_arc)), extent[0]])
+        ymin = np.nanmax([np.nanmin(y_arc[:,:,0]) - 0.2*(abs(np.nanmin(y_arc[:,:,0]) - yc_arc)), extent[2]])
+        ymax = np.nanmin([np.nanmax(y_arc[:,:,1]) + 0.2*(abs(np.nanmax(y_arc[:,:,1]) - yc_arc)), extent[3]])
         
         ############
         nv = self.cube.nv
@@ -341,10 +320,10 @@ class Surface:
                 ax.plot(xc_arc, yc_arc, '+', color='white')
 
                 # zooming in on the surface
-                plt.xlim(xmax, xmin)
-                plt.ylim(ymin, ymax)
-                #plt.xlim(2.5, -2.5)
-                #plt.ylim(-2.5, 2.5)
+                #plt.xlim(xmax, xmin)
+                #plt.ylim(ymin, ymax)
+                plt.xlim(2.5, -2.5)
+                plt.ylim(-2.5, 2.5)
                 
                 ## adding trace points                
                 ax.plot(x_arc[iv,:],y_arc[iv,:,0], '.', color='cyan')

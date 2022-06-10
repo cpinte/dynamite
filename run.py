@@ -2,15 +2,19 @@ import os
 import measure_height as mh
 import my_casa_cube as casa
 
-#data = casa.Cube('./HD163296_CO.pbcor.fits')
-#mh.Surface(data, PA=133, inc=47, x_c=480, y_c=477, v_syst=5.7, sigma=5) 
+# HD163296
+data = casa.Cube('./HD163296_CO.pbcor.fits')
+mh.Surface(data, PA=133, inc=47, x_c=480, y_c=477, v_syst=5.7, sigma=5) 
 
+# HD169142
 #data = casa.Cube('./HD169142_12co_contsub_r0.5_uv0.08_clipped.fits')
 #mh.Surface(data, PA=5, inc=13, x_c=400, y_c=400, v_syst=6.9, sigma=10)
 
+# HD169142 non-clipped cube
 #data = casa.Cube('./HD169142_12co_contsub_r1.5_uv0.1.fits')
 #mh.Surface(data, PA=5, inc=13, x_c=900, y_c=900, v_syst=6.9, sigma=10) 
 
+# MWC758
 #data = casa.Cube('./MWC_758_TM1_12CO_selfcal_v4.9-6.9_dv0.1kms.image.pbcor.fits')
 #mh.Surface(data, PA=65, inc=21, x_c=500, y_c=500, v_syst=5.9, sigma=5) 
 
