@@ -8,7 +8,6 @@ from scipy.stats import binned_statistic
 import matplotlib.gridspec as gridspec
 from matplotlib.patches import Ellipse
 from matplotlib.colors import LogNorm, PowerNorm
-
 import matplotlib.pyplot as plt
 import bettermoments as bm
 import my_casa_cube as casa
@@ -20,7 +19,7 @@ import matplotlib.cm as cm
 
 class Surface:
 
-    def __init__(self, cube=None, PA=None, inc=None, x_c=None, y_c=None, v_syst=None, sigma=8, **kwargs):
+    def __init__(self, cube=None, PA=None, inc=None, x_c=None, y_c=None, v_syst=None, sigma=5, **kwargs):
 
         self.cube = cube
 
@@ -31,19 +30,34 @@ class Surface:
         self.sigma = sigma
         self.v_syst = v_syst
 
-        if not os.path.exists(str(cube.filename.replace(".fits","_gv0.fits"))):
-            self._compute_velocity_fields()
+        if not os.path.exists(str(cube.filename.replace(".fits",".mom9.fits"))):
+            cube = np.copy(self.image)
+            dv = np.abs(self.velocity[1] - self.velocity[0])
+
+            x_rms = self.cube.nx * 0.25
+            y_rms = self.cube.ny * 0.25
+            rms = np.nanstd(cube.image[0,:x_rms,:y_rms])
+            self.rms = rms
+
+            M = self.velocity[0] - dv * np.argmax(cube, axis=0)
+            M = np.ma.masked_where(M < self.sigma*self.rms, M)
         else:
-            path = self.cube.filename
-            bm_data, bm_velax = bm.load_cube(path)
-            rms = bm.estimate_RMS(data=bm_data, N=1)
+            rms = np.nanstd(self.cube.image[:,:,:])
+            #path = self.cube.filename
+            #bm_data, bm_velax = bm.load_cube(path)
+            #rms = bm.estimate_RMS(data=bm_data, N=1)
             self.rms = rms
             print("rms =",rms)
         
         self._detect_surface()
+
+        #traces_txt = np.loadtxt('CQ_Tau_346GHz_pixel_coords.txt')
+        #self.x_surf = traces_txt[:,0]
+        #self.y_surf = traces_txt[:,1]
+        
         self._plot_traced_channels()
-        self._compute_surface()
-        self._plot_mol_surface()
+        #self._compute_surface()
+        #self._plot_mol_surface()
 
         return
     
@@ -89,7 +103,8 @@ class Surface:
         # parameters
         nx, nv, ny = self.cube.nx, self.cube.nv, self.cube.ny
         v = self.cube.velocity[:,np.newaxis]
-        dv = round(self.cube.velocity[1]-self.cube.velocity[0], 3)
+        dv = np.abs(self.velocity[1] - self.velocity[0])
+        #dv = round(self.cube.velocity[1]-self.cube.velocity[0], 3)
         print("spectral res. =",dv)
 
         # setting up arrays
@@ -98,15 +113,16 @@ class Surface:
         Bv_surf = np.zeros([nv,nx,2])
 
         # load in velocity map
-        vfields = casa.Cube(self.cube.filename.replace(".fits","_gv0.fits"))
-        vfields_im = np.nan_to_num(vfields.image[:,:])
+        vfields = casa.Cube(self.cube.filename.replace(".fits",".mom9.fits"))
+        #vfields_im = np.nan_to_num(vfields.image[:,:])
+        vfields_im = np.nan_to_num(vfields.image[0,:,:])
         vfields_im_rot = rotate_disc(vfields_im, PA=self.PA, x_c=self.x_c, y_c=self.y_c)
-
+        
         # Loop over the channels
         for iv in range(nv):
             
             print(iv,"/",nv-1, v[iv][0])
-            
+         
             # rotate the image so major axis is aligned with x-axis.
             im = np.nan_to_num(self.cube.image[iv,:,:])
             im_rot = rotate_disc(im, PA=self.PA, x_c=self.x_c, y_c=self.y_c)
@@ -121,10 +137,10 @@ class Surface:
             for i in range(nx):
 
                 vert_profile = im_rot[:,i]
-                vfields_profile = vfields_im_rot[:,i] / 1.e3  #add a check for units and convert if necessary.
+                vfields_profile = vfields_im_rot[:,i] #/ 1.e3  #add a check for units and convert if necessary.
             
                 # finding the flux maxima for each slice in the x-axis
-                local_max, mom9_coords = search_maxima(vert_profile, vfields_profile, v=v[iv][0], dv=dv, y_c=self.y_c, threshold=self.sigma*self.rms, dx=self.cube.bmaj/self.cube.pixelscale)
+                local_max = search_maxima(vert_profile, vfields_profile, v=v[iv][0], dv=dv, y_c=self.y_c, threshold=self.sigma*self.rms, ny=ny, dx=self.cube.bmaj/self.cube.pixelscale)
 
                 # require a minimum of 2 points; to identify surfaces above and below the star
                 if len(local_max) > 1:
@@ -146,11 +162,15 @@ class Surface:
                     x_surf[iv,:n] = x[in_surface]
                     y_surf[iv,:n,:] = local_surf[in_surface,:]
                     Bv_surf[iv,:n,:] = B_surf[in_surface,:]
-    
 
         self.x_surf = x_surf
         self.y_surf = y_surf
         self.Bv_surf = Bv_surf
+        
+        freq = str(round(self.cube.restfreq/1.e9))
+        source = self.cube.object
+        location = os.path.dirname(os.path.realpath(self.cube.filename))
+        np.savetxt(location+'/'+source+'_'+freq+'GHz_pixel_coords.txt', np.column_stack([self.x_surf, self.y_surf[:,:,0], self.y_surf[:,:,1]]))
 
 
     def _compute_surface(self):
@@ -178,20 +198,20 @@ class Surface:
         mask = (y_mean == 0)    # removing x coordinates with no traced points.
         y_mean_masked = np.ma.masked_array(y_mean, mask).compressed()
         
-        if (len(np.where(y_mean_masked.ravel() < self.y_c)[0]) > 0.5*len(y_mean_masked.ravel())):
-            factor = 0
+        if (len(np.where(y_mean_masked.ravel() > 0)[0]) > 0.5*len(y_mean_masked.ravel())):
+            condition = 0
         else:
-            factor = 1
+            condition = 1
 
         # computing the radius and height and converting units to arcseconds
-        if factor == 0:
+        if condition == 0:
             print('bottom layer is the near side')
-            h = y_mean / np.sin(inc_rad)
-            r = np.hypot(self.x_surf - self.x_c, abs(y_b - y_mean) / np.cos(inc_rad))
-        elif factor == 1:
-            print('top layer is the near side')
-            h = y_mean / np.sin(inc_rad)
+            h = abs(y_mean) / np.sin(inc_rad)
             r = np.hypot(self.x_surf - self.x_c, (y_a - y_mean) / np.cos(inc_rad))
+        elif condition == 1:
+            print('top layer is the near side')
+            h = abs(y_mean) / np.sin(inc_rad)
+            r = np.hypot(self.x_surf - self.x_c, abs(y_b - y_mean) / np.cos(inc_rad))
 
         r *= self.cube.pixelscale
         h *= self.cube.pixelscale        
@@ -285,11 +305,17 @@ class Surface:
         #xc_arc = -(self.x_c - ((self.cube.nx - 1) / 2)) * self.cube.pixelscale
         #yc_arc = (self.y_c - ((self.cube.ny - 1) / 2)) * self.cube.pixelscale
         
+        # finding plotting limits
+        xmin = np.max([np.nanmin(x_arc[:,:]) - 0.2*(abs(np.nanmin(x_arc[:,:]) - xc_arc)), extent[1]])
+        xmax = np.min([np.nanmax(x_arc[:,:]) + 0.2*(abs(np.nanmax(x_arc[:,:]) - xc_arc)), extent[0]])
+        ymin = np.max([np.nanmin(y_arc[:,:,0]) - 0.2*(abs(np.nanmin(y_arc[:,:,0]) - yc_arc)), extent[2]])
+        ymax = np.min([np.nanmax(y_arc[:,:,1]) + 0.2*(abs(np.nanmax(y_arc[:,:,1]) - yc_arc)), extent[3]])
+        
         ############
         nv = self.cube.nv
 
         norm = PowerNorm(1, vmin=0, vmax=np.max(self.cube._Jybeam_to_Tb(np.nan_to_num(self.cube.image[:,:,:]))))
-        cmap = cmo.cm.rain
+        cmap = cm.inferno
 
         freq = str(round(self.cube.restfreq/1.e9))
         source = self.cube.object
@@ -314,33 +340,26 @@ class Surface:
                 # adding marker for disc centre
                 ax.plot(xc_arc, yc_arc, '+', color='white')
 
-                ## adding trace points                
-                ax.plot(x_arc[iv,:],y_arc[iv,:,0], '.', markersize=2, color='white')
-                ax.plot(x_arc[iv,:],y_arc[iv,:,1], '.', markersize=2, color='white')
-
                 # zooming in on the surface
-                '''
-                # to be updated
-            
-                xmin = np.min(np.min(x_arc[iv]) - 0.2*(abs(np.min(x_arc[iv]) - self.x_c)), extent[3])
-                xmax = np.max(np.max(x_arc[iv]) + 0.2*(abs(np.max(x_arc[iv]) - self.x_c)), extent[1])
-                ymin = np.max(np.min(y_arc[iv]) - 0.2*(abs(np.min(y_arc[iv]) - self.y_c)), extent[2])
-                ymax = np.min(np.max(y_arc[iv]) + 0.2*(abs(np.max(y_arc[iv]) - self.y_c)), extent[0])
-            
-                plt.xlim(xmin, xmax)
+                plt.xlim(xmax, xmin)
                 plt.ylim(ymin, ymax)
+                #plt.xlim(2.5, -2.5)
+                #plt.ylim(-2.5, 2.5)
+                
+                ## adding trace points                
+                ax.plot(x_arc[iv,:],y_arc[iv,:,0], '.', color='cyan')
+                ax.plot(x_arc[iv,:],y_arc[iv,:,1], '.', color='cyan')
             
                 # adding beam
-                ax = plt.gca()
-                beam = Ellipse(xy=(xmin + 0.1*abs(xmax-xmin), ymax - 0.1*abs(ymax-ymin)), width=self.cube.bmin, height=self.cube.bmaj, angle=-self.cube.bpa, fill=True, color='white')
-                ax.add_patch(beam)
-                '''
+                #ax = plt.gca()
+                #beam = Ellipse(xy=(xmax - 3*self.cube.bmaj/self.cube.pixelscale, ymin + 3*self.cube.bmaj/self.cube.pixelscale), width=self.cube.bmin, height=self.cube.bmaj, angle=-self.cube.bpa, fill=True, color='white')
+                #ax.add_patch(beam)
 
                 pdf.savefig(bbox_inches='tight')
                 plt.close()
 
 
-def search_maxima(yprofile, velprofile, v=None, dv=None, y_c=None, threshold=None, dx=0):
+def search_maxima(yprofile, vprofile, v=None, dv=None, y_c=None, threshold=None, ny=None, dx=0):
 
     # find local maxima
     v += dv/2
@@ -351,9 +370,6 @@ def search_maxima(yprofile, velprofile, v=None, dv=None, y_c=None, threshold=Non
     if threshold:
         # to remove noise
         i_max = i_max[np.where(yprofile[i_max]>threshold)]
-        # to remove loud noise
-        i_max = i_max[np.where(yprofile[i_max-1]>threshold)]
-        i_max = i_max[np.where(yprofile[i_max+1]>threshold)]
 
     # re-arrange local maxima from strongest signal to weakest
     i_max = i_max[np.argsort(yprofile[i_max])][::-1]
@@ -363,29 +379,37 @@ def search_maxima(yprofile, velprofile, v=None, dv=None, y_c=None, threshold=Non
     i_max_below = i_max[np.where(i_max < y_c)]
     
     # finding isovelocity points, from velocity fields map
-    diff_vel = abs(velprofile - v)
+    diff_vel = abs(vprofile - v)
     diff_vel[diff_vel > dv/2] = np.inf
 
     vel_above = np.argmin(diff_vel[y_c:]) + y_c
     vel_below = np.argmin(diff_vel[:y_c])
         
-    vel_coords = [vel_below, vel_above] 
-    
-    # finding point closest to isovelocity curve
-    if len(i_max_above) > 0 and len(i_max_below) > 0:
-        ycoord_above = i_max_above[np.where(abs(i_max_above - vel_above) < dx)]
-        ycoord_below = i_max_below[np.where(abs(i_max_below - vel_below) < dx)]
-    else:
-        ycoord_above = []
-        ycoord_below = []
+    vel_coords = [vel_below, vel_above]
 
-    # defining the i_max array to return
-    if len(ycoord_above) > 0 and len(ycoord_below) > 0:
+    # tracing layer above y-star
+    if len(i_max_above) > 0:
+        ycoord_above = i_max_above[np.where(abs(i_max_above - vel_above) < 2*dx)]
+    else:
+        ycoord_above = [None]
+    if len(ycoord_above) == 0:
+        ycoord_above = [None]
+        
+    # tracing layer below y-star
+    if len(i_max_below) > 0:
+        ycoord_below = i_max_below[np.where(abs(i_max_below - vel_below) < 2*dx)]
+    else:
+        ycoord_below = [None]
+    if len(ycoord_below) == 0:
+        ycoord_below = [None]
+    
+    # defining the i-max array to return
+    if (ycoord_above[0] and ycoord_below[0]) is not None: 
         ycoords = [ycoord_below[0], ycoord_above[0]]
     else:
         ycoords = []
     
-    return ycoords, vel_coords
+    return ycoords
     
 
 def rotate_disc(channel, PA=None, x_c=None, y_c=None):
