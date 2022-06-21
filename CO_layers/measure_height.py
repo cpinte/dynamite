@@ -1,6 +1,7 @@
 from scipy.ndimage import rotate, shift
 from scipy.interpolate import interp1d
 import scipy.constants as sc
+import astropy.constants as ac
 import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
 from scipy.stats import binned_statistic
@@ -10,16 +11,16 @@ import matplotlib.pyplot as plt
 
 class Surface:
 
-    def __init__(self, 
-        cube: None, 
-        PA: float = None, 
-        inc: float = None, 
-        dRA: float = 0.0, 
-        dDec: float = 0.0, 
-        x_star: float = None, 
-        y_star: float = None, 
-        v_syst: float = None, 
-        sigma: float = 5,  
+    def __init__(self,
+        cube: None,
+        PA: float = None,
+        inc: float = None,
+        dRA: float = 0.0,
+        dDec: float = 0.0,
+        x_star: float = None,
+        y_star: float = None,
+        v_syst: float = None,
+        sigma: float = 5,
         **kwargs):
         '''
         Parameters
@@ -283,7 +284,7 @@ class Surface:
         self.v = v
 
 
-    def plot_surfaces(self, 
+    def plot_surfaces(self,
         nbins: int = 30,
         m_star: float = None,
         ):
@@ -362,12 +363,12 @@ class Surface:
         #Adding hard outline
         bar_size = 3
         c ="black"
-        for i, axes in enumerate(ax):   
+        for i, axes in enumerate(ax):
             ax[i].axhline(linewidth=bar_size, y=ax[i].get_ylim()[0], color=c)
             ax[i].axvline(linewidth=bar_size, x=ax[i].get_xlim()[0], color=c)
             ax[i].axhline(linewidth=bar_size, y=ax[i].get_ylim()[1], color=c)
             ax[i].axvline(linewidth=bar_size, x=ax[i].get_xlim()[1], color=c)
-             
+
 
         return P
 
@@ -410,8 +411,8 @@ class Surface:
         for i, ax in enumerate(axs.flatten()):
             self.plot_channel(i*dv,ax=ax)
 
-    def fit_central_mass(self, 
-        initial_guess: float = None, 
+    def fit_central_mass(self,
+        initial_guess: float = None,
         dist: float = None):
         '''
         Parameters
@@ -437,16 +438,19 @@ class Surface:
 
         '''
 
+        if (dist is None):
+            raise ValueError("dist must be provided")
+
         initial = np.array([initial_guess])
-        
-        soln = minimize(self._ln_like, initial, bounds=((0, None),))
+
+        soln = minimize(self._ln_like, initial, args=(dist), bounds=((0, None),))
 
         print("Maximum likelihood estimate:")
         print(soln)
 
         return soln.x
 
-    def _ln_like(self, theta):
+    def _ln_like(self, theta, dist):
         """Compute the ln like..
         """
 
@@ -454,7 +458,7 @@ class Surface:
         m_star = theta[0]
 
         # compute the model for the chi2
-        v_model = self._keplerian_disc(m_star)
+        v_model = self._keplerian_disc(m_star, dist)
 
         v = self.v.ravel().compressed()
 
@@ -465,19 +469,17 @@ class Surface:
         chi2= np.sum(((v - v_model)**2 / v_error**2) +  np.log(2*np.pi*v_error**2))
         return 0.5 * chi2
 
-    def _keplerian_disc(self, m_star):
+    def _keplerian_disc(self, m_star, dist):
         """M_star for a kerplerian disc"""
         #Defining constants
         G = sc.G
-        msun = 1.989*10**30
-        au_2_m = 1.496e+11
+        msun = ac.M_sun.value
 
-        r = self.r.ravel().compressed()
-        h = self.h.ravel().compressed()
-        r = 312*au_2_m*r
-        h = 312*au_2_m*h
+
+        r = self.r.ravel().compressed() * dist * sc.au
+        h = self.h.ravel().compressed() * dist * sc.au
         v = np.sqrt((G*m_star*msun*r**2)/((r**2 + h**2)**(3/2)))/1000
-        return v    
+        return v
 
 
 def search_maxima(y, threshold=None, dx=0):
