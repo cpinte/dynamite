@@ -5,5 +5,5 @@ setup(name='co_layers',
       url='http://github.com/cpinte/CO_layers',
       author='Christophe Pinte',
       license='MIT',
-      packages=['co_layers'],
+      packages=['CO_layers'],
       zip_safe=False)

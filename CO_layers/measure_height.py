@@ -4,19 +4,75 @@ import scipy.constants as sc
 import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
 from scipy.stats import binned_statistic
+from scipy.optimize import minimize
 
 import matplotlib.pyplot as plt
 
 class Surface:
 
-    def __init__(self, cube=None, PA=None, inc=None, x_star=None, y_star=None, v_syst=None, sigma=5, **kwargs):
+    def __init__(self, 
+        cube: None, 
+        PA: float = None, 
+        inc: float = None, 
+        dRA: float = 0.0, 
+        dDec: float = 0.0, 
+        x_star: float = None, 
+        y_star: float = None, 
+        v_syst: float = None, 
+        sigma: float = 5,  
+        **kwargs):
+        '''
+        Parameters
+        ----------
+        cube
+            Instance of an image cube of the line data.
+        PA
+            Position angle of the source in degrees, measured from east to north.
+        inc
+            Inclination of the source in degrees.
+        dRA
+            offset in arcseconds
+        dDec
+            offset in arcseconds
+        x_star
+            offset in pixels, set as nx/2 for the center
+        y_star
+            offset in pixels, set as nx/2 for the center
+        v_syst
+            system velocity in km/s.
+        v_mask
+            mask channels within a certain km/s range of the systematic velocity
+        sigma
+            cutt off threshold to fit surface
+
+        Returns
+        -------
+        An instance with the detected surface.
+
+        Notes
+        -----
+        Any notes?
+
+        Other Parameters
+        ----------------
+
+        Examples
+        --------
+
+        '''
 
         self.cube = cube
 
         self.PA = PA
         self.inc = inc
-        self.x_star = x_star
-        self.y_star = y_star
+
+        if x_star is None and y_star is None:
+            self.x_star = (cube.nx/2 +1) + (dRA*np.pi/(180 * 3600))/np.abs(cube.header['CDELT1']*np.pi/180)
+            self.y_star = (cube.ny/2 +1) + (dDec*np.pi/(180 * 3600))/np.abs(cube.header['CDELT2']*np.pi/180)
+        else:
+            self.x_star = x_star
+            self.y_star = y_star
+
         self.sigma = sigma
         self.v_syst = v_syst
 
@@ -45,6 +101,7 @@ class Surface:
         x_surf = np.zeros([nv,nx])
         y_surf = np.zeros([nv,nx,2])
         Tb_surf = np.zeros([nv,nx,2])
+        Ib_surf = np.zeros([nv,nx,2])
 
         # Measure the rms in 1st channel
         std = np.nanstd(cube.image[1,:,:])
@@ -64,6 +121,7 @@ class Surface:
             j_surf = np.zeros([nx,2], dtype=int)
             j_surf_exact = np.zeros([nx,2])
             T_surf = np.zeros([nx,2])
+            I_surf = np.zeros([nx,2])
 
             # Loop over the pixels along the x-axis to find surface
             for i in range(nx):
@@ -113,6 +171,7 @@ class Surface:
                         # Saving the coordinates
                         j_surf_exact[i,k] = y_max
                         T_surf[i,k] = cube._Jybeam_to_Tb(f_max) # Converting to Tb (currently assuming the cube is in Jy/beam)
+                        I_surf[i,k] = f_max
 
             #-- Now we try to clean out a bit the surfaces we have extracted
 
@@ -153,6 +212,7 @@ class Surface:
                     x_surf[iv,:n] = x[in_surface]
                     y_surf[iv,:n,:] = j_surf_exact[in_surface,:]
                     Tb_surf[iv,:n,:] = T_surf[in_surface,:]
+                    Ib_surf[iv,:n,:] = I_surf[in_surface,:]
 
                 #-- test if we have points on both side of the star
                 # - remove side with the less points
@@ -162,7 +222,8 @@ class Surface:
         self.x_sky = x_surf
         self.y_sky = y_surf
         self.Tb = Tb_surf
-
+        self.I = Ib_surf
+        self.snr = Ib_surf/std
 
 
     def _compute_surface(self):
@@ -222,64 +283,91 @@ class Surface:
         self.v = v
 
 
-    def plot_surfaces(self):
+    def plot_surfaces(self, 
+        nbins: int = 30,
+        m_star: float = None,
+        ):
 
-        color = np.abs(np.repeat(np.arange(201)[:,np.newaxis],501,axis=1) - 101)
-        color = "black"
         r = self.r
         h = self.h
         v=self.v
         T = np.mean(self.Tb[:,:,:],axis=2)
-
-        plt.figure('height')
-        plt.clf()
-#        plt.scatter(r.ravel(),h.ravel(),alpha=0.2,s=5,c=color.ravel(),cmap="viridis")
-        plt.scatter(r.ravel(),h.ravel(),alpha=0.2,s=5,cmap="viridis")
-
-        plt.figure('velocity')
-        plt.clf()
-        #plt.scatter(r.ravel(),v.ravel(),alpha=0.2,s=5,c=color.ravel(),cmap="viridis")
-        plt.scatter(r.ravel(),v.ravel(),alpha=0.2,s=5,cmap="viridis")
-
-        plt.figure('Brightness temperature')
-        plt.clf()
-        #plt.scatter(r.ravel(),T.ravel(),alpha=0.2,s=5,c=color.ravel(),cmap="viridis")
-        plt.scatter(r.ravel(),T.ravel(),alpha=0.2,s=5,cmap="viridis")
-
-        #-- Ignoring channels close to systemic velocity
-        # change of mind : we do it later
-
-        #-- fitting a power-law
-        P, res_h, _, _, _ = np.ma.polyfit(np.log10(r.ravel()),np.log10(h.ravel()),1, full=True)
-        x = np.linspace(np.min(r),np.max(r),100)
-        plt.figure('height')
-        plt.plot(x, 10**P[1] * x**P[0])
 
         r_data = r.ravel().compressed()#[np.invert(mask.ravel())]
         h_data = h.ravel().compressed()#[np.invert(mask.ravel())]
         v_data = v.ravel().compressed()#[np.invert(mask.ravel())]
         T_data = np.mean(self.Tb[:,:,:],axis=2).ravel()[np.invert(r.mask.ravel())]
 
-        #plt.scatter(r_data,h_data)
+        #-- fitting a power-law
+        P, res_h, _, _, _ = np.ma.polyfit(np.log10(r.ravel()),np.log10(h.ravel()),1, full=True)
+        x = np.linspace(np.min(r),np.max(r),100)
 
-        bins, _, _ = binned_statistic(r_data,[r_data,h_data], bins=30)
-        std, _, _  = binned_statistic(r_data,h_data, 'std', bins=30)
+        font=30
+        line_width=3
 
-        print("STD =", np.median(std))
-        plt.errorbar(bins[0,:], bins[1,:],yerr=std, color="red")
+        fig = plt.figure(figsize=(30,11))
+        gs = fig.add_gridspec(nrows=1,ncols=3)
+        gs.update(wspace=0.2, hspace=0.05)
+        ax=[]
+        for i in range(0,1):
+            for j in range(0,3):
+                ax.append(fig.add_subplot(gs[i,j]))
 
-        bins_v, _, _ = binned_statistic(r_data,[r_data,v_data], bins=30)
-        std_v, _, _  = binned_statistic(r_data,v_data, 'std', bins=30)
+        #Altitude
 
-        print("STD =", np.median(std_v))  # min seems a better estimate for x_star than std_h
-        plt.figure('velocity')
-        plt.errorbar(bins_v[0,:], bins_v[1,:], yerr=std_v, color="red", marker="o", fmt=' ', markersize=2)
+        ax[0].scatter(r.ravel(),h.ravel(),alpha=0.5,s=10,color="grey",marker='o')
 
-        bins_T, _, _ = binned_statistic(r_data,[r_data,T_data], bins=30)
-        std_T, _, _  = binned_statistic(r_data,T_data, 'std', bins=30)
+        bins, _, _ = binned_statistic(r_data,[r_data,h_data], bins=nbins)
+        std, _, _  = binned_statistic(r_data,h_data, 'std', bins=nbins)
 
-        plt.figure('Brightness temperature')
-        plt.errorbar(bins_T[0,:], bins_T[1,:], yerr=std_T, color="red", marker="o", fmt=' ', markersize=2)
+        ax[0].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="red", fmt='o', mec='k', mfc='red', ms=10, elinewidth=2)
+
+        ax[0].plot(x, 10**P[1] * x**P[0], color='k', ls='--', alpha=0.75, lw=line_width)
+
+
+        #Velocity
+        ax[1].scatter(r.ravel(),v.ravel(),alpha=0.5,s=10,color="grey",marker='o', label = 'data')
+
+        bins, _, _ = binned_statistic(r_data,[r_data,v_data], bins=nbins)
+        std, _, _  = binned_statistic(r_data,v_data, 'std', bins=nbins)
+
+        ax[1].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="red", fmt='o', mec='k', mfc='red', ms=10, elinewidth=2)
+
+        if m_star:
+            v_model = self._keplerian_disc(m_star)
+            ax[1].scatter(r_data, v_model,alpha=0.5,s=10,color="blue",marker='o', label = 'model')
+
+        #Temperature
+
+        ax[2].scatter(r.ravel(),T.ravel(),alpha=0.5,s=10,color="grey",marker='o')
+
+        bins, _, _ = binned_statistic(r_data,[r_data,T_data], bins=nbins)
+        std, _, _  = binned_statistic(r_data,T_data, 'std', bins=nbins)
+
+        ax[2].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="red", fmt='o', mec='k', mfc='red', ms=10, elinewidth=2)
+
+        ax[0].set_ylabel('Height (")', fontsize=font)
+        ax[1].set_ylabel('Velocity (km/s)', fontsize=font)
+        ax[2].set_ylabel('Brightness Temperature (K)', fontsize=font)
+
+        ax[0].set_xlabel('Radius (")', fontsize=font)
+        ax[1].set_xlabel('Radius (")', fontsize=font)
+        ax[2].set_xlabel('Radius (")', fontsize=font)
+
+        ax[0].tick_params(axis='both', direction='out', labelbottom=True, labelleft=True, top=False, right=False, width=3, length=8 ,labelsize=font-10)
+        ax[1].tick_params(axis='both', direction='out', labelbottom=True, labelleft=True, top=False, right=False, width=3, length=8 ,labelsize=font-10)
+        ax[2].tick_params(axis='both', direction='out', labelbottom=True, labelleft=True, top=False, right=False, width=3, length=8 ,labelsize=font-10)
+
+
+        #Adding hard outline
+        bar_size = 3
+        c ="black"
+        for i, axes in enumerate(ax):   
+            ax[i].axhline(linewidth=bar_size, y=ax[i].get_ylim()[0], color=c)
+            ax[i].axvline(linewidth=bar_size, x=ax[i].get_xlim()[0], color=c)
+            ax[i].axhline(linewidth=bar_size, y=ax[i].get_ylim()[1], color=c)
+            ax[i].axvline(linewidth=bar_size, x=ax[i].get_xlim()[1], color=c)
+             
 
         return P
 
@@ -321,6 +409,75 @@ class Surface:
 
         for i, ax in enumerate(axs.flatten()):
             self.plot_channel(i*dv,ax=ax)
+
+    def fit_central_mass(self, 
+        initial_guess: float = None, 
+        dist: float = None):
+        '''
+        Parameters
+        ----------
+        initial_guess
+            initial guess of central mass
+        dist
+            distance of source in pc.
+
+        Returns
+        -------
+        Minimised central mass solution.
+
+        Notes
+        -----
+        Any notes?
+
+        Other Parameters
+        ----------------
+
+        Examples
+        --------
+
+        '''
+
+        initial = np.array([initial_guess])
+        
+        soln = minimize(self._ln_like, initial, bounds=((0, None),))
+
+        print("Maximum likelihood estimate:")
+        print(soln)
+
+        return soln.x
+
+    def _ln_like(self, theta):
+        """Compute the ln like..
+        """
+
+        #define param values
+        m_star = theta[0]
+
+        # compute the model for the chi2
+        v_model = self._keplerian_disc(m_star)
+
+        v = self.v.ravel().compressed()
+
+        #using 1/snr as the error on the velocity
+        v_error = 1/(np.mean(self.snr[:,:,:],axis=2).ravel()[np.invert(self.r.mask.ravel())])
+
+        # chi2
+        chi2= np.sum(((v - v_model)**2 / v_error**2) +  np.log(2*np.pi*v_error**2))
+        return 0.5 * chi2
+
+    def _keplerian_disc(self, m_star):
+        """M_star for a kerplerian disc"""
+        #Defining constants
+        G = sc.G
+        msun = 1.989*10**30
+        au_2_m = 1.496e+11
+
+        r = self.r.ravel().compressed()
+        h = self.h.ravel().compressed()
+        r = 312*au_2_m*r
+        h = 312*au_2_m*h
+        v = np.sqrt((G*m_star*msun*r**2)/((r**2 + h**2)**(3/2)))/1000
+        return v    
 
 
 def search_maxima(y, threshold=None, dx=0):
