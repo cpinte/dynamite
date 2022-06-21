@@ -6,21 +6,23 @@ import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
 from scipy.stats import binned_statistic
 from scipy.optimize import minimize
+from numpy import ndarray
+from scipy.optimize import curve_fit
 
 import matplotlib.pyplot as plt
 
 class Surface:
 
-    def __init__(self,
-        cube: None,
-        PA: float = None,
-        inc: float = None,
-        dRA: float = 0.0,
-        dDec: float = 0.0,
-        x_star: float = None,
-        y_star: float = None,
-        v_syst: float = None,
-        sigma: float = 5,
+    def __init__(self, 
+        cube: None, 
+        PA: float = None, 
+        inc: float = None, 
+        dRA: float = 0.0, 
+        dDec: float = 0.0, 
+        x_star: float = None, 
+        y_star: float = None, 
+        v_syst: float = None, 
+        sigma: float = 5,  
         **kwargs):
         '''
         Parameters
@@ -284,24 +286,58 @@ class Surface:
         self.v = v
 
 
-    def plot_surfaces(self,
+    def plot_surfaces(self, 
         nbins: int = 30,
         m_star: float = None,
+        m_star_h_func: float = None,
+        h_func: ndarray = None,
+        dist: float = None,
+        plot_power_law: bool = False,
+        plot_tapered_power_law: bool = False,
+        r0: float = 1.0,
         ):
+        '''
+        Parameters
+        ----------
+        nbins
+            Number of bins to bin the data.
+        m_star
+            Central mass for Keplerian rotation plot [kgs].
+        m_star_h_func
+            Central mass for Keplerian rotation plot based of a given height prescription [msun].
+        h_func
+            Height prescription from a given fitted surface e.g. a power law fit.
+        plot_power_law
+            Fits the data with a power law and plots it.
+        plot_tapered_power_law
+            Fits the data with a tapered power law and plots it.
+        r0
+            Reference radius for surface height fits.
 
+        Returns
+        -------
+        CO_layers results figure.
+
+        Notes
+        -----
+        Any notes?
+
+        Other Parameters
+        ----------------
+
+        Examples
+        --------
+
+        '''
         r = self.r
         h = self.h
-        v=self.v
+        v = self.v
         T = np.mean(self.Tb[:,:,:],axis=2)
 
         r_data = r.ravel().compressed()#[np.invert(mask.ravel())]
         h_data = h.ravel().compressed()#[np.invert(mask.ravel())]
         v_data = v.ravel().compressed()#[np.invert(mask.ravel())]
         T_data = np.mean(self.Tb[:,:,:],axis=2).ravel()[np.invert(r.mask.ravel())]
-
-        #-- fitting a power-law
-        P, res_h, _, _, _ = np.ma.polyfit(np.log10(r.ravel()),np.log10(h.ravel()),1, full=True)
-        x = np.linspace(np.min(r),np.max(r),100)
 
         font=30
         line_width=3
@@ -316,27 +352,56 @@ class Surface:
 
         #Altitude
 
-        ax[0].scatter(r.ravel(),h.ravel(),alpha=0.5,s=10,color="grey",marker='o')
+        ax[0].scatter(r.ravel(),h.ravel(),alpha=0.5,s=10,color="grey",marker='o', label = 'data')
 
         bins, _, _ = binned_statistic(r_data,[r_data,h_data], bins=nbins)
         std, _, _  = binned_statistic(r_data,h_data, 'std', bins=nbins)
 
-        ax[0].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="red", fmt='o', mec='k', mfc='red', ms=10, elinewidth=2)
+        ax[0].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="red", fmt='o', mec='k', mfc='red', ms=10, elinewidth=2, label='Binned data')
 
-        ax[0].plot(x, 10**P[1] * x**P[0], color='k', ls='--', alpha=0.75, lw=line_width)
+        if plot_power_law:
+            #-- fitting a power-law
+            P, C = self.fit_surface_height(r0 = r0)
+            x = np.linspace(np.min(r),np.max(r),100)
+
+            print('Power law fit: z0 =', P[0], ', phi =',P[1])
+            
+            ax[0].plot(x, P[0]*(x/r0)**P[1], color='k', ls='--', alpha=0.75, lw=line_width, label='PL')
+
+        if plot_tapered_power_law:
+            #-- fitting a power-law
+            P, C = self.fit_surface_height(tapered_power_law = True, r0 = r0)
+            x = np.linspace(np.min(r),np.max(r),100)
+
+            print('Power law fit: z0 =', P[0], ', phi =',P[1], ', r_taper', P[2], ', q_taper =', P[3])
+            
+            ax[0].plot(x, P[0]*((x/r0)**P[1]) * np.exp(-((x/r0)/P[2])**P[3]) , color='k', ls='-.', alpha=0.75, lw=line_width, label='Tapered PL')
 
 
         #Velocity
-        ax[1].scatter(r.ravel(),v.ravel(),alpha=0.5,s=10,color="grey",marker='o', label = 'data')
+        ax[1].scatter(r.ravel(),v.ravel(),alpha=0.5,s=10,color="grey",marker='o', label = 'Data')
 
         bins, _, _ = binned_statistic(r_data,[r_data,v_data], bins=nbins)
         std, _, _  = binned_statistic(r_data,v_data, 'std', bins=nbins)
 
-        ax[1].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="red", fmt='o', mec='k', mfc='red', ms=10, elinewidth=2)
+        ax[1].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="red", fmt='o', mec='k', mfc='red', ms=10, elinewidth=2, label='Binned data')
 
         if m_star:
-            v_model = self._keplerian_disc(m_star)
-            ax[1].scatter(r_data, v_model,alpha=0.5,s=10,color="blue",marker='o', label = 'model')
+            if (dist is None):
+                raise ValueError("dist must be provided")
+            v_model = self._keplerian_disc(m_star, dist)
+            ax[1].scatter(r_data, v_model,alpha=0.5,s=10,color="blue",marker='o', label = 'Kep model')
+
+        if m_star_h_func:
+            if (dist is None):
+                raise ValueError("dist must be provided")
+                
+            v_model = self._keplerian_disc(m_star_h_func, dist, h_func=h_func)
+
+            x = np.sort(r_data)
+            v_mod = -np.sort(-v_model)
+
+            ax[1].plot(x, v_mod,alpha=0.75, ls='--',color="purple", label = 'Kep model w h_func', lw=line_width)
 
         #Temperature
 
@@ -363,14 +428,14 @@ class Surface:
         #Adding hard outline
         bar_size = 3
         c ="black"
-        for i, axes in enumerate(ax):
+        for i, axes in enumerate(ax):   
             ax[i].axhline(linewidth=bar_size, y=ax[i].get_ylim()[0], color=c)
             ax[i].axvline(linewidth=bar_size, x=ax[i].get_xlim()[0], color=c)
             ax[i].axhline(linewidth=bar_size, y=ax[i].get_ylim()[1], color=c)
             ax[i].axvline(linewidth=bar_size, x=ax[i].get_xlim()[1], color=c)
+             
 
-
-        return P
+        return 
 
     def plot_channel(self,iv, win=20,ax=None):
 
@@ -411,16 +476,23 @@ class Surface:
         for i, ax in enumerate(axs.flatten()):
             self.plot_channel(i*dv,ax=ax)
 
-    def fit_central_mass(self,
-        initial_guess: float = None,
-        dist: float = None):
+    def fit_central_mass(self, 
+        initial_guess: float = None, 
+        dist: float = None,
+        h_func: ndarray = None,
+        ):
         '''
         Parameters
         ----------
         initial_guess
-            initial guess of central mass
+            initial guess of central mass [kgs].
         dist
             distance of source in pc.
+        h_func
+            Height prescription from a given fitted surface e.g. a power law fit. 
+            
+            Setting this parameter will produce a m_star minimisation solution based
+            off this height fit and not the scattered height data.
 
         Returns
         -------
@@ -437,20 +509,19 @@ class Surface:
         --------
 
         '''
-
         if (dist is None):
             raise ValueError("dist must be provided")
 
         initial = np.array([initial_guess])
-
-        soln = minimize(self._ln_like, initial, args=(dist), bounds=((0, None),))
+        
+        soln = minimize(self._ln_like, initial, bounds=((0, None),), args=(dist, h_func))
 
         print("Maximum likelihood estimate:")
         print(soln)
 
         return soln.x
 
-    def _ln_like(self, theta, dist):
+    def _ln_like(self, theta, dist, h_func = None):
         """Compute the ln like..
         """
 
@@ -458,7 +529,10 @@ class Surface:
         m_star = theta[0]
 
         # compute the model for the chi2
-        v_model = self._keplerian_disc(m_star, dist)
+        if h_func is not None:
+            v_model = self._keplerian_disc(m_star, dist, h_func=h_func)
+        else:
+            v_model = self._keplerian_disc(m_star, dist, h_func=h_func)
 
         v = self.v.ravel().compressed()
 
@@ -469,17 +543,71 @@ class Surface:
         chi2= np.sum(((v - v_model)**2 / v_error**2) +  np.log(2*np.pi*v_error**2))
         return 0.5 * chi2
 
-    def _keplerian_disc(self, m_star, dist):
+    def _keplerian_disc(self, m_star, dist, h_func=None):
         """M_star for a kerplerian disc"""
         #Defining constants
         G = sc.G
         msun = ac.M_sun.value
 
-
         r = self.r.ravel().compressed() * dist * sc.au
-        h = self.h.ravel().compressed() * dist * sc.au
+
+        if h_func is not None:
+            h = h_func * dist * sc.au
+        else:
+            h = self.h.ravel().compressed() * dist * sc.au
+
         v = np.sqrt((G*m_star*msun*r**2)/((r**2 + h**2)**(3/2)))/1000
-        return v
+        return v    
+
+    def fit_surface_height(self,
+        r0: float = 1.0,
+        tapered_power_law: bool = False
+        ):
+        '''
+        Parameters
+        ----------
+        r0
+            Reference radius for surface height fits.
+        tapered_power_law
+            Alternatively fit a tapered power law.
+
+        Returns
+        -------
+        A functional fit to the emitting surface.
+
+        Notes
+        -----
+        Any notes?
+
+        Other Parameters
+        ----------------
+
+        Examples
+        --------
+
+        '''
+
+        r = np.array(self.r.ravel().compressed())
+        h = self.h.ravel().compressed()
+        error = 1/(np.mean(self.snr[:,:,:],axis=2).ravel()[np.invert(self.r.mask.ravel())])
+
+        if tapered_power_law:
+
+            bnds = ((0.0, 0.0, 0.0, r.min()),(5.0, 5.0, 5.0, 2*r.max()))
+
+            def func(r, z0, phi, q_taper, r_taper):
+                return z0*((r/r0)**phi) * np.exp(-(r/r_taper)**q_taper)
+        else:
+
+            bnds = ((0.0,0.0),(5.0,5.0))
+
+            def func(r, z0, phi):
+                return z0*(r/r0)**phi
+
+
+        popt, copt = curve_fit(func, r, h, sigma = error, bounds=bnds, maxfev = 100000)
+
+        return popt, copt
 
 
 def search_maxima(y, threshold=None, dx=0):
