@@ -23,6 +23,7 @@ class Surface:
         y_star: float = None, 
         v_syst: float = None, 
         sigma: float = 5,  
+        exclude_chans: ndarray = None,
         **kwargs):
         '''
         Parameters
@@ -47,6 +48,9 @@ class Surface:
             mask channels within a certain km/s range of the systematic velocity
         sigma
             cutt off threshold to fit surface
+        exclude_chans
+            Excludes channels based on the channel ID chosen by the user. By default, if no channels
+            are selected the code will exclude the closest channel to the systematic velocity.
 
         Returns
         -------
@@ -79,9 +83,13 @@ class Surface:
         self.sigma = sigma
         self.v_syst = v_syst
 
+        if exclude_chans is None:
+            self.exclude_chans = np.array([np.abs(self.cube.velocity - self.v_syst).argmin()])
+        else:
+            self.exclude_chans = exclude_chans
+
         self._detect_surface()
         self._compute_surface()
-
         return
 
     def _detect_surface(self):
@@ -154,6 +162,10 @@ class Surface:
                             # the average of the top surfaces cannot be below the star
                             in_surface[i] = False
 
+                        #excluding surfaces as selected by the user, or as default the closest channel to the systematic velocity
+                        if iv in self.exclude_chans:
+                            in_surface[i] = False
+
                     #-- We find a spatial quadratic to refine position of maxima (like bettermoment does in velocity)
                     for k in range(2):
                         j = j_surf[i,k]
@@ -194,8 +206,8 @@ class Surface:
                 if (len(x1) > 2):
                     P = np.polyfit(x1,y1,1)
 
-                    #x_plot = np.array([0,nx])
-                    #plt.plot(x_plot, P[1] + P[0]*x_plot)
+                    # x_plot = np.array([0,nx])
+                    # plt.plot(x_plot, P[1] + P[0]*x_plot)
 
                     #in_surface_tmp = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) # test only front surface
                     in_surface_tmp = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) & (j_surf_exact[:,1] > (P[1] + P[0]*x))
@@ -437,7 +449,7 @@ class Surface:
 
         return 
 
-    def plot_channel(self,iv, win=20,ax=None):
+    def plot_channel(self, iv, win=20, radius=1.0, ax=None):
 
         if ax is None:
             ax = plt.gca()
@@ -451,7 +463,15 @@ class Surface:
         if self.PA is not None:
             im = np.array(rotate(im, self.PA - 90.0, reshape=False))
 
-        ax.imshow(im, origin="lower")#, interpolation="bilinear")
+        pix_size = cube.header['CDELT2']*3600
+
+        extent = (cube.nx/2 + radius/pix_size, cube.nx/2 - radius/pix_size, cube.ny/2 - radius/pix_size, cube.ny/2 + radius/pix_size)
+
+        ax.imshow(im, origin="lower", cmap='binary_r')#, interpolation="bilinear")
+        ax.set_xlim(cube.nx/2 + radius/pix_size, cube.nx/2 - radius/pix_size)
+        ax.set_ylim(cube.ny/2 - radius/pix_size, cube.ny/2 + radius/pix_size)
+        ax.tick_params(axis='both', direction='out', labelbottom=False, labelleft=False, labeltop=False, labelright=False)
+        ax.set_title(r'$\Delta$v='+"{:.2f}".format(cube.velocity[iv])+' , id:'+str(iv), color='k')
 
         if n_surf[iv]:
             ax.plot(x[iv,:n_surf[iv]],y[iv,:n_surf[iv],0],"o",color="red",markersize=1)
@@ -463,7 +483,7 @@ class Surface:
             #ax.set_ylim(np.min(y[iv,:n_surf[iv],:]) - 10*cube.bmaj/cube.pixelscale,np.max(y[iv,:n_surf[iv],:]) + 10*cube.bmaj/cube.pixelscale)
 
 
-    def plot_channels(self,n=20, win=21):
+    def plot_channels(self,n=20, win=21, radius=1.0):
 
         nv = self.cube.nv
         dv = np.floor(nv/n).astype(int)
@@ -474,7 +494,7 @@ class Surface:
         fig, axs = plt.subplots(ncols=5, nrows=nrows, figsize=(11, 2*nrows+1),constrained_layout=True,num=win)
 
         for i, ax in enumerate(axs.flatten()):
-            self.plot_channel(i*dv,ax=ax)
+            self.plot_channel(i*dv, radius=radius, ax=ax) 
 
     def fit_central_mass(self, 
         initial_guess: float = None, 
