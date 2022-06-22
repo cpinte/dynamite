@@ -23,6 +23,7 @@ class Surface:
         y_star: float = None, 
         v_syst: float = None, 
         sigma: float = 5,  
+        exclude_chans: ndarray = None,
         **kwargs):
         '''
         Parameters
@@ -47,6 +48,9 @@ class Surface:
             mask channels within a certain km/s range of the systematic velocity
         sigma
             cutt off threshold to fit surface
+        exclude_chans
+            Excludes channels based on the channel ID chosen by the user. By default, if no channels
+            are selected the code will exclude the closest channel to the systematic velocity.
 
         Returns
         -------
@@ -79,9 +83,13 @@ class Surface:
         self.sigma = sigma
         self.v_syst = v_syst
 
+        if exclude_chans is None:
+            self.exclude_chans = np.array([np.abs(self.cube.velocity - self.v_syst).argmin()])
+        else:
+            self.exclude_chans = exclude_chans
+
         self._detect_surface()
         self._compute_surface()
-
         return
 
     def _detect_surface(self):
@@ -154,6 +162,10 @@ class Surface:
                             # the average of the top surfaces cannot be below the star
                             in_surface[i] = False
 
+                        #excluding surfaces as selected by the user, or as default the closest channel to the systematic velocity
+                        if iv in self.exclude_chans:
+                            in_surface[i] = False
+
                     #-- We find a spatial quadratic to refine position of maxima (like bettermoment does in velocity)
                     for k in range(2):
                         j = j_surf[i,k]
@@ -194,9 +206,8 @@ class Surface:
                 if (len(x1) > 2):
                     P = np.polyfit(x1,y1,1)
 
-                    x_plot = np.array([0,nx])
-                    plt.plot(x_plot, P[1] + P[0]*x_plot)
-                    plt.show()
+                    # x_plot = np.array([0,nx])
+                    # plt.plot(x_plot, P[1] + P[0]*x_plot)
 
                     #in_surface_tmp = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) # test only front surface
                     in_surface_tmp = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) & (j_surf_exact[:,1] > (P[1] + P[0]*x))
@@ -460,8 +471,7 @@ class Surface:
         ax.set_xlim(cube.nx/2 + radius/pix_size, cube.nx/2 - radius/pix_size)
         ax.set_ylim(cube.ny/2 - radius/pix_size, cube.ny/2 + radius/pix_size)
         ax.tick_params(axis='both', direction='out', labelbottom=False, labelleft=False, labeltop=False, labelright=False)
-        ax.set_title(r'$\Delta$v='+"{:.2f}".format(cube.velocity[iv]), color='k')
-
+        ax.set_title(r'$\Delta$v='+"{:.2f}".format(cube.velocity[iv])+' , id:'+str(iv), color='k')
 
         if n_surf[iv]:
             ax.plot(x[iv,:n_surf[iv]],y[iv,:n_surf[iv],0],"o",color="red",markersize=1)
