@@ -2,6 +2,7 @@ import os
 import sys
 import my_casa_cube as casa
 
+import cv2
 import numpy as np
 import scipy.constants as sc
 from scipy import ndimage
@@ -77,23 +78,28 @@ class Surface:
         Bv_surf = np.zeros([nv,nx,4])
         
         # Loop over the channels
-        for iv in range(nv): 
+        for iv in range(1): 
+
+            iv += 40
             
             print(iv,"/",nv-1, v[iv][0])
          
             # rotate the image so major axis is aligned with x-axis.
             im = np.nan_to_num(self.cube.image[iv,:,:])
             im_rot = rotate_disc(im, PA=self.PA, x_c=self.x_c, y_c=self.y_c)
+            vfields_im = np.nan_to_num(self.vfields)
             vfields_im_rot = rotate_disc(self.vfields, PA=self.PA, x_c=self.x_c, y_c=self.y_c)
 
             # masking per channel
 
             vfields_im_rot[im_rot < self.sigma*self.rms] = 0
             im_rot[im_rot < self.sigma*self.rms] = 0
-            
+
+            kernel = int(np.ceil(3*(self.cube.bmaj/self.cube.pixelscale)) // 2 * 2 + 1)
+            im_rot_blurred = cv2.GaussianBlur(im_rot/255.0, (kernel, kernel), cv2.BORDER_DEFAULT)
+            im_rot = im_rot_blurred
             '''
-            plt.imshow(im_rot, origin='lower', cmap=cm.Greys_r)
-            plt.colorbar()
+            plt.imshow(im_rot, origin='lower')
             plt.show()
             sys.exit()
             '''
@@ -104,13 +110,15 @@ class Surface:
 
             # loop through each x-coordinate
             for i in range(nx):
+
+                #i += 178
                 
                 vert_profile = im_rot[:,i]
                 vfields_profile = vfields_im_rot[:,i]
             
                 # finding the flux maxima for each slice in the x-axis
                 local_max = search_maxima(vert_profile, vfields_profile, v=v[iv][0], dv=dv, y_c=self.y_c, ny=ny, dx=self.cube.bmaj/self.cube.pixelscale)
-                print(local_max)
+                #print(local_max)
                 
                 if any(x is not None for x in local_max) is True:
 
@@ -287,7 +295,7 @@ class Surface:
         nv = self.cube.nv
 
         norm = PowerNorm(1, vmin=0, vmax=np.max(self.cube._Jybeam_to_Tb(np.nan_to_num(self.cube.image[:,:,:]))))
-        cmap = cm.inferno
+        cmap = cm.Greys_r
 
         freq = str(round(self.cube.restfreq/1.e9))
         source = self.cube.object
@@ -315,14 +323,14 @@ class Surface:
                 # zooming in on the surface
                 #plt.xlim(xmax, xmin)
                 #plt.ylim(ymin, ymax)
-                plt.xlim(1.5, -1.5)
-                plt.ylim(-1.5, 1.5)
+                #plt.xlim(1.5, -1.5)
+                #plt.ylim(-1.5, 1.5)
                 
                 ## adding trace points                
-                ax.plot(x_arc[iv,:],y_arc[iv,:,0], '.', color='green')
-                ax.plot(x_arc[iv,:],y_arc[iv,:,1], '.', color='blue')
-                ax.plot(x_arc[iv,:],y_arc[iv,:,2], '.', color='red')
-                ax.plot(x_arc[iv,:],y_arc[iv,:,3], '.', color='pink')
+                ax.plot(x_arc[iv,:],y_arc[iv,:,0], 'o', color='blue')
+                ax.plot(x_arc[iv,:],y_arc[iv,:,1], '+', color='orange')
+                #ax.plot(x_arc[iv,:],y_arc[iv,:,2], '.', color='red')
+                #ax.plot(x_arc[iv,:],y_arc[iv,:,3], '.', color='pink')
                 
             
                 # adding beam
@@ -337,7 +345,7 @@ class Surface:
 def search_maxima(line_profile, v_profile, v=None, dv=None, y_c=None, ny=None, dx=0):
 
     # find local maxima
-    v += 0.5 * dv
+    #v += 0.5 * dv
     
     dI = line_profile[1:] - line_profile[:-1]
     I_max = np.where((np.hstack((0, dI)) > 0) & (np.hstack((dI, 0)) < 0))[0]
@@ -345,80 +353,193 @@ def search_maxima(line_profile, v_profile, v=None, dv=None, y_c=None, ny=None, d
     # sort from strongest signal to weakest
     
     I_max = I_max[np.argsort(line_profile[I_max])][::-1]
-
+    
     # finding iso-velocity curves
 
-    dv = abs(v_profile - v)
-    v_diff = dv[np.argsort(dv)]
-    if len(v_diff) == 1:
-        v_iso = dv[:1]
-    elif len(v_diff) == 2:
-        v_iso = dv[:2]
-        v_iso = v_iso[np.argsort(line_profile[v_iso])][::-1]
-    elif len(v_diff) == 3:
-        v_iso = dv[:3]
-        v_iso = v_iso[np.argsort(line_profile[v_iso])][::-1]
-    elif len(v_diff) >=4 :
-        v_iso = dv[:4]
-        v_iso = v_iso[np.argsort(line_profile[v_iso])][::-1]
-
-    # determining the surfaces
+    v_diff = abs(v_profile - v)
     
-    if len(I_max) == 0:
+    v_idx = np.where(v_diff < dv)[0]
+    
+    if v_idx.size >= 2:
+
+        print(v_idx)
+        filtered_v_idx = []
+        filtered_v_idx.append(v_idx[0])
+        previous = v_idx[0]
+        for i in range(1, v_idx.size):
+            diff = v_idx[i] - previous
+            if diff > dx:
+                filtered_v_idx.append(v_idx[i])
+                previous = v_idx[i]
+
+        v_idx = np.array(filtered_v_idx)
+     
+        v_idx = v_idx[np.argsort(line_profile[v_idx])][::-1]
+
+        print(v_idx)
+           
+    # determining the surfaces
+
+    #if I_max.size >= 2 and v_idx.size >= 2:
+
+        
+    
+    v_iso = v_idx[:2]
+    
+    if len(I_max) and len(v_iso) >= 2:
+        
+        coord_1 = np.max(v_iso)
+        coord_2 = np.min(v_iso)
+
+        '''
+        front_surface_upper = next(iter(I_max[np.where(abs(I_max - coord_1) < dx)]), None)        
+        front_surface_lower = next(iter(I_max[np.where(abs(I_max - coord_2) < dx)]), None)
+
+        if front_surface_upper is None or front_surface_lower is None:
+            back_surface_upper = None
+            back_surface_lower = None
+
+        if front_surface_upper is not None and front_surface_lower is not None:
+            if abs(front_surface_upper - front_surface_lower) < dx:
+                back_surface_upper = None
+                back_surface_lower = None
+        '''  
+        front_surface_upper = coord_1
+        front_surface_lower = coord_2
+        
+        back_surface_upper = None
+        back_surface_lower = None
+        
+    else:
 
         front_surface_upper = None
         front_surface_lower = None
         back_surface_upper = None
         back_surface_lower = None
         
-    elif len(I_max) == 1:
+    '''
+    elif len(I_max) and len(v_diff) == 3:
 
-        coord_1 = I_max[0]
-        if coord_1 > y_c:
-            front_surface_upper = coord_1
-            front_surface_lower = None
+        coord_1 = v_iso[0]
+        coord_2 = v_iso[1]
+        coord_3 = v_iso[2]
+
+        if coord_1 > coord_2:
+            
+            front_surface_upper = I_max[np.where(abs(I_max - coord_1) < dx)]
+            if len(front_surface_upper) > 0:
+                front_surface_upper = front_surface_upper[0]
+            else:
+                front_surface_upper = None
+                
+            front_surface_lower = I_max[np.where(abs(I_max - coord_2) < dx)]
+            if len(front_surface_lower) > 0:
+                front_surface_lower = front_surface_lower[0]
+            else:
+                front_surface_lower = None
+                
         else:
-            front_surface_lower = coord_1
-            front_surface_upper = None
-        back_surface_upper = None
-        back_surface_lower = None
-        
-    elif len(I_max) == 2:
-        
-        coord_1 = I_max[0]
-        coord_2 = I_max[1]
-        
-        front_surface_upper = np.max([coord_1, coord_2])
-        front_surface_lower = np.min([coord_1, coord_2])
-        back_surface_upper = None
-        back_surface_lower = None
-
-    elif len(I_max) == 3:
-
-        coord_1 = I_max[0]
-        coord_2 = I_max[1]
-        coord_3 = I_max[2]
-    
-        front_surface_upper = np.max([coord_1, coord_2])
-        front_surface_lower = np.min([coord_1, coord_2])
+            
+            front_surface_upper = I_max[np.where(abs(I_max - coord_2) < dx)]
+            if len(front_surface_upper) > 0:
+                front_surface_upper = front_surface_upper[0]
+            else:
+                front_surface_upper = None
+                
+            front_surface_lower = I_max[np.where(abs(I_max - coord_1) < dx)]
+            if len(front_surface_lower) > 0:
+                front_surface_lower = front_surface_lower[0]
+            else:
+                front_surface_lower = None
+            
         if coord_3 > y_c:
-            back_surface_upper = coord_3
+            
+            back_surface_upper = I_max[np.where(abs(I_max - coord_3) < dx)]
+            if len(front_surface_upper) > 0:
+                back_surface_upper = front_surface_upper[0]
+            else:
+                back_surface_upper = None
             back_surface_lower = None
+            
         else:
-            back_surface_lower = coord_3
+            
             back_surface_upper = None
+            back_surface_lower = I_max[np.where(abs(I_max - coord_3) < dx)]
+            if len(front_surface_lower) > 0:
+                back_surface_lower = front_surface_lower[0]
+            else:
+                back_surface_lower = None
         
-    elif len(I_max) >= 4:
+    elif len(I_max) and len(v_diff) >= 4:
         
-        coord_1 = I_max[0]
-        coord_2 = I_max[1]
-        coord_3 = I_max[2]
-        coord_4 = I_max[3]
+        coord_1 = v_iso[0]
+        coord_2 = v_iso[1]
+        coord_3 = v_iso[2]
+        coord_4 = v_iso[3]
+
+        if coord_1 > coord_2:
+            
+            front_surface_upper = I_max[np.where(abs(I_max - coord_1) < dx)]
+            if len(front_surface_upper) > 0:
+                front_surface_upper = front_surface_upper[0]
+            else:
+                front_surface_upper = None
+                
+            front_surface_lower = I_max[np.where(abs(I_max - coord_2) < dx)]
+            if len(front_surface_lower) > 0:
+                front_surface_lower = front_surface_lower[0]
+            else:
+                front_surface_lower = None
+                
+        else:
+            
+            front_surface_upper = I_max[np.where(abs(I_max - coord_2) < dx)]
+            if len(front_surface_upper) > 0:
+                front_surface_upper = front_surface_upper[0]
+            else:
+                front_surface_upper = None
+                
+            front_surface_lower = I_max[np.where(abs(I_max - coord_1) < dx)]
+            if len(front_surface_lower) > 0:
+                front_surface_lower = front_surface_lower[0]
+            else:
+                front_surface_lower = None
+            
+        if coord_3 > coord_4:
+            
+            back_surface_upper = I_max[np.where(abs(I_max - coord_3) < dx)]
+            if len(back_surface_upper) > 0:
+                back_surface_upper = back_surface_upper[0]
+            else:
+                back_surface_upper = None
+                
+            back_surface_lower = I_max[np.where(abs(I_max - coord_4) < dx)]
+            if len(back_surface_lower) > 0:
+                back_surface_lower = back_surface_lower[0]
+            else:
+                back_surface_lower = None
+                
+        else:
+            
+            back_surface_lower = I_max[np.where(abs(I_max - coord_4) < dx)]
+            if len(back_surface_lower) > 0:
+                back_surface_lower = back_surface_lower[0]
+            else:
+                back_surface_lower = None
+                
+            back_surface_upper = I_max[np.where(abs(I_max - coord_3) < dx)]
+            if len(back_surface_upper) > 0:
+                back_surface_upper = back_surface_upper[0]
+            else:
+                back_surface_upper = None
     
-        front_surface_upper = np.max([coord_1, coord_2])
-        front_surface_lower = np.min([coord_1, coord_2])
-        back_surface_upper = np.max([coord_3, coord_4])
-        back_surface_lower = np.min([coord_3, coord_4])
+    else:
+
+        front_surface_upper = None
+        front_surface_lower = None
+        back_surface_upper = None
+        back_surface_lower = None
+    '''       
     
     coords = [front_surface_upper, front_surface_lower, back_surface_upper, back_surface_lower]
 
