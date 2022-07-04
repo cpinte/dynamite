@@ -29,8 +29,8 @@ import my_casa_cube as casa
 ###### Synthetic cubes ###########
 
 #test1, co_abs_zr_gt0.0
-data = casa.Cube('./co_abs_zr_gt0.0_conv.fits')
-mh.Surface(data, PA=270, inc=45, x_c=158, y_c=158, v_syst=5.9, sigma=10)
+#data = casa.Cube('./co_abs_zr_gt0.0_conv.fits')
+#mh.Surface(data, PA=270, inc=45, x_c=158, y_c=158, v_syst=5.9, sigma=5)
 
 #test2; co_abs_zr_gt0.3
 #data = casa.Cube('./co_abs_zr_gt0.3_conv.fits')
