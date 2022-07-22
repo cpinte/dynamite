@@ -1,6 +1,5 @@
 import os
 import sys
-import my_casa_cube as casa
 
 import cv2
 from scipy.signal import find_peaks
