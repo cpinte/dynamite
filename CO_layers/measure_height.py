@@ -13,16 +13,16 @@ import matplotlib.pyplot as plt
 
 class Surface:
 
-    def __init__(self, 
-        cube: None, 
-        PA: float = None, 
-        inc: float = None, 
-        dRA: float = 0.0, 
-        dDec: float = 0.0, 
-        x_star: float = None, 
-        y_star: float = None, 
-        v_syst: float = None, 
-        sigma: float = 5,  
+    def __init__(self,
+        cube: None,
+        PA: float = None,
+        inc: float = None,
+        dRA: float = 0.0,
+        dDec: float = 0.0,
+        x_star: float = None,
+        y_star: float = None,
+        v_syst: float = None,
+        sigma: float = 5,
         exclude_chans: ndarray = None,
         **kwargs):
         '''
@@ -298,7 +298,7 @@ class Surface:
         self.v = v
 
 
-    def plot_surfaces(self, 
+    def plot_surfaces(self,
         nbins: int = 30,
         m_star: float = None,
         m_star_h_func: float = None,
@@ -377,7 +377,7 @@ class Surface:
             x = np.linspace(np.min(r),np.max(r),100)
 
             print('Power law fit: z0 =', P[0], ', phi =',P[1])
-            
+
             ax[0].plot(x, P[0]*(x/r0)**P[1], color='k', ls='--', alpha=0.75, lw=line_width, label='PL')
 
         if plot_tapered_power_law:
@@ -386,7 +386,7 @@ class Surface:
             x = np.linspace(np.min(r),np.max(r),100)
 
             print('Power law fit: z0 =', P[0], ', phi =',P[1], ', r_taper', P[2], ', q_taper =', P[3])
-            
+
             ax[0].plot(x, P[0]*((x/r0)**P[1]) * np.exp(-((x/r0)/P[2])**P[3]) , color='k', ls='-.', alpha=0.75, lw=line_width, label='Tapered PL')
 
 
@@ -407,7 +407,7 @@ class Surface:
         if m_star_h_func:
             if (dist is None):
                 raise ValueError("dist must be provided")
-                
+
             v_model = self._keplerian_disc(m_star_h_func, dist, h_func=h_func)
 
             x = np.sort(r_data)
@@ -440,14 +440,14 @@ class Surface:
         #Adding hard outline
         bar_size = 3
         c ="black"
-        for i, axes in enumerate(ax):   
+        for i, axes in enumerate(ax):
             ax[i].axhline(linewidth=bar_size, y=ax[i].get_ylim()[0], color=c)
             ax[i].axvline(linewidth=bar_size, x=ax[i].get_xlim()[0], color=c)
             ax[i].axhline(linewidth=bar_size, y=ax[i].get_ylim()[1], color=c)
             ax[i].axvline(linewidth=bar_size, x=ax[i].get_xlim()[1], color=c)
-             
 
-        return 
+
+        return
 
     def plot_channel(self, iv, win=20, radius=1.0, ax=None):
 
@@ -483,9 +483,15 @@ class Surface:
             #ax.set_ylim(np.min(y[iv,:n_surf[iv],:]) - 10*cube.bmaj/cube.pixelscale,np.max(y[iv,:n_surf[iv],:]) + 10*cube.bmaj/cube.pixelscale)
 
 
-    def plot_channels(self,n=20, win=21, radius=1.0):
+    def plot_channels(self,n=20, win=21, radius=1.0, iv_min=None, iv_max=None):
 
-        nv = self.cube.nv
+        if iv_min is None:
+            iv_min=0
+
+        if iv_max is None:
+            iv_max = self.cube.nv
+
+        nv = iv_max-iv_min
         dv = np.floor(nv/n).astype(int)
 
         ncols=5
@@ -494,10 +500,10 @@ class Surface:
         fig, axs = plt.subplots(ncols=5, nrows=nrows, figsize=(11, 2*nrows+1),constrained_layout=True,num=win)
 
         for i, ax in enumerate(axs.flatten()):
-            self.plot_channel(i*dv, radius=radius, ax=ax) 
+            self.plot_channel(iv_min+i*dv, radius=radius, ax=ax)
 
-    def fit_central_mass(self, 
-        initial_guess: float = None, 
+    def fit_central_mass(self,
+        initial_guess: float = None,
         dist: float = None,
         h_func: ndarray = None,
         ):
@@ -509,8 +515,8 @@ class Surface:
         dist
             distance of source in pc.
         h_func
-            Height prescription from a given fitted surface e.g. a power law fit. 
-            
+            Height prescription from a given fitted surface e.g. a power law fit.
+
             Setting this parameter will produce a m_star minimisation solution based
             off this height fit and not the scattered height data.
 
@@ -533,7 +539,7 @@ class Surface:
             raise ValueError("dist must be provided")
 
         initial = np.array([initial_guess])
-        
+
         soln = minimize(self._ln_like, initial, bounds=((0, None),), args=(dist, h_func))
 
         print("Maximum likelihood estimate:")
@@ -577,7 +583,7 @@ class Surface:
             h = self.h.ravel().compressed() * dist * sc.au
 
         v = np.sqrt((G*m_star*msun*r**2)/((r**2 + h**2)**(3/2)))/1000
-        return v    
+        return v
 
     def fit_surface_height(self,
         r0: float = 1.0,
