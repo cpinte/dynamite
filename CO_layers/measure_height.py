@@ -10,6 +10,7 @@ from numpy import ndarray
 from scipy.optimize import curve_fit
 
 import matplotlib.pyplot as plt
+import casa_cube
 
 class Surface:
 
@@ -29,7 +30,7 @@ class Surface:
         Parameters
         ----------
         cube
-            Instance of an image cube of the line data.
+            Instance of an image cube of the line data, or string with path to fits cube
         PA
             Position angle of the source in degrees, measured from east to north.
         inc
@@ -68,6 +69,8 @@ class Surface:
 
         '''
 
+        if isinstance(cube,str):
+            cube = casa_cube.Cube(cube)
         self.cube = cube
 
         self.PA = PA
