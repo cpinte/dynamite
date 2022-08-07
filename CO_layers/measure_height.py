@@ -8,6 +8,7 @@ from scipy.stats import binned_statistic
 from scipy.optimize import minimize
 from numpy import ndarray
 from scipy.optimize import curve_fit
+from scipy.signal import find_peaks
 
 import matplotlib.pyplot as plt
 import casa_cube
@@ -91,9 +92,81 @@ class Surface:
         else:
             self.exclude_chans = exclude_chans
 
-        self._detect_surface()
-        self._compute_surface()
+        self._initial_guess()
+
+        #self._detect_surface()
+        #self._compute_surface()
+
         return
+
+
+    def _initial_guess(self):
+        """
+
+        """
+
+        #----------------------------
+        # 1. Noise properties
+        #----------------------------
+
+        # Measure the standard deviation in 1st and last channels
+        std = np.nanstd(self.cube.image[[1,-1],:,:])
+        self.std = std
+
+        print("Estimated std per channel is : ", std, self.cube.unit)
+
+        # Image cube with no NaN
+        if np.isnan(np.max(self.cube.image)):
+            print("Forcing NaNs to 0")
+            self.cube.image = np.nan_to_num(self.cube.image[:,:,:])
+        image = self.cube.image
+
+
+        #----------------------------
+        # 2. Line profile analysis
+        #----------------------------
+
+        # Find the 1st and last channels with significant signal
+        nv = self.cube.nv
+        iv_min = nv
+        iv_max = 0
+        for i in range(nv):
+            if np.max(image[i,:,:]) > 7*std:
+                iv_min = np.minimum(iv_min,i)
+                iv_max = np.maximum(iv_max,i)
+
+        self.iv_min = iv_min
+        self.iv_max = iv_max
+
+        print("Signal detected over velocity range:", self.cube.velocity[[iv_min, iv_max]])
+
+        # Extracting the 2 brightest channels and estimate v_syst
+        im = np.where(image > 3*std, image, 0)
+        profile = np.sum(im, axis=(1,2))
+
+        profile_rms = np.std(profile[:np.maximum(iv_min,10)])
+
+        iv_peaks = search_maxima(profile, height=5*profile_rms, dx=2, prominence=0.05*np.max(profile))
+        self.iv_peaks = iv_peaks
+
+        if (iv_peaks.size < 2):
+            print("Could not find double peaked line profile")
+        if (iv_peaks.size > 2):
+            print("*** WARNING: Found more than 2 peaks in the line profile : please double check estimated values")
+
+        v_syst = np.mean(self.cube.velocity[iv_peaks[:2]])
+
+        print("Estimated systemic velocity =", v_syst)
+
+
+        #---------------------------------
+        # 3. Estimated disk orientation
+        #---------------------------------
+
+        # Measure centroid
+
+        return
+
 
     def _detect_surface(self):
         """
@@ -110,6 +183,7 @@ class Surface:
 
         cube = self.cube
         nx, nv = cube.nx, cube.nv
+        std = self.std
 
         n_surf = np.zeros(nv, dtype=int)
         x_surf = np.zeros([nv,nx])
@@ -117,13 +191,10 @@ class Surface:
         Tb_surf = np.zeros([nv,nx,2])
         Ib_surf = np.zeros([nv,nx,2])
 
-        # Measure the rms in 1st channel
-        std = np.nanstd(cube.image[1,:,:])
-
         surface_color = ["red","blue"]
 
         # Loop over the channels
-        for iv in range(nv):
+        for iv in range(self.iv_min,self.iv_max):
             print(iv,"/",nv-1)
             # Rotate the image so major axis is aligned with x-axis.
             im = np.nan_to_num(cube.image[iv,:,:])
@@ -142,7 +213,7 @@ class Surface:
                 vert_profile = im[:,i]
                 # find the maxima in each vertical cut, at signal above X sigma
                 # ignore maxima not separated by at least a beam
-                j_max = search_maxima(vert_profile,threshold=self.sigma*std, dx=cube.bmaj/cube.pixelscale)
+                j_max = search_maxima(vert_profile, height=self.sigma*std, dx=cube.bmaj/cube.pixelscale, prominence=std)
 
                 if (j_max.size>1): # We need at least 2 maxima to locate the surface
                     in_surface[i] = True
@@ -473,7 +544,7 @@ class Surface:
         ax.imshow(im, origin="lower", cmap='binary_r')#, interpolation="bilinear")
         ax.set_xlim(cube.nx/2 + radius/pix_size, cube.nx/2 - radius/pix_size)
         ax.set_ylim(cube.ny/2 - radius/pix_size, cube.ny/2 + radius/pix_size)
-        ax.tick_params(axis='both', direction='out', labelbottom=False, labelleft=False, labeltop=False, labelright=False)
+        #ax.tick_params(axis='both', direction='out', labelbottom=False, labelleft=False, labeltop=False, labelright=False)
         ax.set_title(r'$\Delta$v='+"{:.2f}".format(cube.velocity[iv])+' , id:'+str(iv), color='k')
 
         if n_surf[iv]:
@@ -639,7 +710,7 @@ class Surface:
         return popt, copt
 
 
-def search_maxima(y, threshold=None, dx=0):
+def search_maxima_old(y, height=None, dx=0, prominence=0):
     """
     Returns the indices of the maxima of a function
     Indices are sorted by decreasing values of the maxima
@@ -648,14 +719,17 @@ def search_maxima(y, threshold=None, dx=0):
          y : array where to search for maxima
          threshold : minimum value of y for a maximum to be detected
          dx : minimum spacing between maxima [in pixel]
+
+
+    Note : this is 50% faster than scipt but do not have promimence
     """
 
     # A maxima is a positive dy followed by a negative dy
     dy = y[1:] - y[:-1]
     i_max = np.where((np.hstack((0, dy)) > 0) & (np.hstack((dy, 0)) < 0))[0]
 
-    if threshold:
-        i_max = i_max[np.where(y[i_max]>threshold)]
+    if height:
+        i_max = i_max[np.where(y[i_max]>height)]
 
     # Sort the peaks by height
     i_max = i_max[np.argsort(y[i_max])][::-1]
@@ -670,5 +744,25 @@ def search_maxima(y, threshold=None, dx=0):
                     flag_remove[i] = False # Keep current max
                     # remove the unwanted maxima
             i_max = i_max[~flag_remove]
+
+    return i_max
+
+
+def search_maxima(y, height=None, dx=0, prominence=0):
+    """
+    Returns the indices of the maxima of a function
+    Indices are sorted by decreasing values of the maxima
+
+    Args:
+         y : array where to search for maxima
+         threshold : minimum value of y for a maximum to be detected
+         dx : minimum spacing between maxima [in pixel]
+    """
+
+     # find local maxima
+    i_max, _ = find_peaks(y, distance = dx, width = 0.5*dx, height = height, prominence = prominence)
+
+    # Sort the peaks by height
+    i_max = i_max[np.argsort(y[i_max])][::-1]
 
     return i_max
