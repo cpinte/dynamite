@@ -172,17 +172,17 @@ class Surface:
 
         plt.plot(self.cube.velocity[iv_peaks], profile[iv_peaks] / self.cube._beam_area_pix(), "o")
 
-        # We take the 2 brightest peaks
+        # We take the 2 brightest peaks, and we sort them in velocity
         iv_peaks = iv_peaks[:2]
-
         iv_peaks = iv_peaks[np.argsort(self.cube.velocity[iv_peaks])]
-
         self.iv_peaks = iv_peaks
 
+        # Refine peak position by fitting a Gaussian
 
+        print("Brighest channels are :", iv_peaks[:2])
         print("Velocity of brighest channels:", self.cube.velocity[iv_peaks[:2]], "km/s")
+        self.delta_v_peaks = self.cube.velocity[iv_peaks[1]] - self.cube.velocity[iv_peaks[0]]
         self.v_syst = np.mean(self.cube.velocity[iv_peaks[:2]])
-
         print("Estimated systemic velocity =", self.v_syst, "km/s")
 
 
@@ -223,7 +223,7 @@ class Surface:
         self.x_star = np.mean(x)
         self.y_star = np.mean(y)
 
-        print("Estimated position of star:", self.x_star, self.y_star)
+        print("Estimated position of star:", self.x_star, self.y_star, "(pixels)")
 
 
         return
@@ -272,7 +272,7 @@ class Surface:
                 vert_profile = im[:,i]
                 # find the maxima in each vertical cut, at signal above X sigma
                 # ignore maxima not separated by at least a beam
-                j_max = search_maxima(vert_profile, height=self.sigma*std, dx=cube.bmaj/cube.pixelscale, prominence=std)
+                j_max = search_maxima(vert_profile, height=self.sigma*std, dx=cube.bmaj/cube.pixelscale, prominence=5*std)
 
                 if (j_max.size>1): # We need at least 2 maxima to locate the surface
                     in_surface[i] = True
@@ -413,7 +413,7 @@ class Surface:
         mask = (h<0) | np.isinf(v) | np.isnan(v)
 
         # -- we remove channels that are too close to the systemic velocity
-        mask = mask | (np.abs(self.cube.velocity - self.v_syst) < 1.5)[:,np.newaxis]
+        mask = mask | (np.abs(self.cube.velocity - self.v_syst) < 0.25*self.delta_v_peaks)[:,np.newaxis]
 
         r = np.ma.masked_array(r,mask)
         h = np.ma.masked_array(h,mask)
@@ -484,10 +484,7 @@ class Surface:
         v_data = v.ravel().compressed()#[np.invert(mask.ravel())]
         T_data = np.mean(self.Tb[:,:,:],axis=2).ravel()[np.invert(r.mask.ravel())]
 
-        font=30
-        line_width=3
-
-        fig = plt.figure(figsize=(30,11))
+        fig = plt.figure(figsize=(15,5))
         gs = fig.add_gridspec(nrows=1,ncols=3)
         gs.update(wspace=0.2, hspace=0.05)
         ax=[]
@@ -502,7 +499,7 @@ class Surface:
         bins, _, _ = binned_statistic(r_data,[r_data,h_data], bins=nbins)
         std, _, _  = binned_statistic(r_data,h_data, 'std', bins=nbins)
 
-        ax[0].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="red", fmt='o', mec='k', mfc='red', ms=10, elinewidth=2, label='Binned data')
+        ax[0].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="red", fmt='o', mec='k', mfc='red', ms=3, elinewidth=2, label='Binned data')
 
         if plot_power_law:
             #-- fitting a power-law
@@ -511,7 +508,7 @@ class Surface:
 
             print('Power law fit: z0 =', P[0], ', phi =',P[1])
 
-            ax[0].plot(x, P[0]*(x/r0)**P[1], color='k', ls='--', alpha=0.75, lw=line_width, label='PL')
+            ax[0].plot(x, P[0]*(x/r0)**P[1], color='k', ls='--', alpha=0.75, label='PL')
 
         if plot_tapered_power_law:
             #-- fitting a power-law
@@ -520,7 +517,7 @@ class Surface:
 
             print('Power law fit: z0 =', P[0], ', phi =',P[1], ', r_taper', P[2], ', q_taper =', P[3])
 
-            ax[0].plot(x, P[0]*((x/r0)**P[1]) * np.exp(-((x/r0)/P[2])**P[3]) , color='k', ls='-.', alpha=0.75, lw=line_width, label='Tapered PL')
+            ax[0].plot(x, P[0]*((x/r0)**P[1]) * np.exp(-((x/r0)/P[2])**P[3]) , color='k', ls='-.', alpha=0.75, label='Tapered PL')
 
 
         #Velocity
@@ -529,7 +526,7 @@ class Surface:
         bins, _, _ = binned_statistic(r_data,[r_data,v_data], bins=nbins)
         std, _, _  = binned_statistic(r_data,v_data, 'std', bins=nbins)
 
-        ax[1].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="red", fmt='o', mec='k', mfc='red', ms=10, elinewidth=2, label='Binned data')
+        ax[1].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="red", fmt='o', mec='k', mfc='red', ms=3, elinewidth=2, label='Binned data')
 
         if m_star:
             if (dist is None):
@@ -546,7 +543,7 @@ class Surface:
             x = np.sort(r_data)
             v_mod = -np.sort(-v_model)
 
-            ax[1].plot(x, v_mod,alpha=0.75, ls='--',color="purple", label = 'Kep model w h_func', lw=line_width)
+            ax[1].plot(x, v_mod,alpha=0.75, ls='--',color="purple", label = 'Kep model w h_func')
 
         #Temperature
 
@@ -555,34 +552,33 @@ class Surface:
         bins, _, _ = binned_statistic(r_data,[r_data,T_data], bins=nbins)
         std, _, _  = binned_statistic(r_data,T_data, 'std', bins=nbins)
 
-        ax[2].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="red", fmt='o', mec='k', mfc='red', ms=10, elinewidth=2)
+        ax[2].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="red", fmt='o', mec='k', mfc='red', ms=3, elinewidth=2)
 
-        ax[0].set_ylabel('Height (")', fontsize=font)
-        ax[1].set_ylabel('Velocity (km/s)', fontsize=font)
-        ax[2].set_ylabel('Brightness Temperature (K)', fontsize=font)
+        ax[0].set_ylabel('Height (")')
+        ax[1].set_ylabel('Velocity (km/s)')
+        ax[2].set_ylabel('Brightness Temperature (K)')
 
-        ax[0].set_xlabel('Radius (")', fontsize=font)
-        ax[1].set_xlabel('Radius (")', fontsize=font)
-        ax[2].set_xlabel('Radius (")', fontsize=font)
+        ax[0].set_xlabel('Radius (")')
+        ax[1].set_xlabel('Radius (")')
+        ax[2].set_xlabel('Radius (")')
 
-        ax[0].tick_params(axis='both', direction='out', labelbottom=True, labelleft=True, top=False, right=False, width=3, length=8 ,labelsize=font-10)
-        ax[1].tick_params(axis='both', direction='out', labelbottom=True, labelleft=True, top=False, right=False, width=3, length=8 ,labelsize=font-10)
-        ax[2].tick_params(axis='both', direction='out', labelbottom=True, labelleft=True, top=False, right=False, width=3, length=8 ,labelsize=font-10)
+       # ax[0].tick_params(axis='both', direction='out', labelbottom=True, labelleft=True, top=False, right=False, width=3, length=8 ,labelsize=font-10)
+        #ax[1].tick_params(axis='both', direction='out', labelbottom=True, labelleft=True, top=False, right=False, width=3, length=8 ,labelsize=font-10)
+        #ax[2].tick_params(axis='both', direction='out', labelbottom=True, labelleft=True, top=False, right=False, width=3, length=8 ,labelsize=font-10)
 
 
         #Adding hard outline
-        bar_size = 3
-        c ="black"
-        for i, axes in enumerate(ax):
-            ax[i].axhline(linewidth=bar_size, y=ax[i].get_ylim()[0], color=c)
-            ax[i].axvline(linewidth=bar_size, x=ax[i].get_xlim()[0], color=c)
-            ax[i].axhline(linewidth=bar_size, y=ax[i].get_ylim()[1], color=c)
-            ax[i].axvline(linewidth=bar_size, x=ax[i].get_xlim()[1], color=c)
-
+        #bar_size = 3
+        #c ="black"
+        #for i, axes in enumerate(ax):
+        #    ax[i].axhline(linewidth=bar_size, y=ax[i].get_ylim()[0], color=c)
+        #    ax[i].axvline(linewidth=bar_size, x=ax[i].get_xlim()[0], color=c)
+        #    ax[i].axhline(linewidth=bar_size, y=ax[i].get_ylim()[1], color=c)
+        #    ax[i].axvline(linewidth=bar_size, x=ax[i].get_xlim()[1], color=c)
 
         return
 
-    def plot_channel(self, iv, win=20, radius=1.0, ax=None):
+    def plot_channel(self, iv, win=20, radius=3.0, ax=None):
 
         if ax is None:
             ax = plt.gca()
@@ -625,7 +621,7 @@ class Surface:
             iv_max = self.cube.nv
 
         nv = iv_max-iv_min
-        dv = np.floor(nv/n).astype(int)
+        dv = nv/n
 
         ncols=5
         nrows = np.ceil(n / ncols).astype(int)
@@ -633,7 +629,7 @@ class Surface:
         fig, axs = plt.subplots(ncols=5, nrows=nrows, figsize=(11, 2*nrows+1),constrained_layout=True,num=win)
 
         for i, ax in enumerate(axs.flatten()):
-            self.plot_channel(iv_min+i*dv, radius=radius, ax=ax)
+            self.plot_channel(int(iv_min+i*dv), radius=radius, ax=ax)
 
     def fit_central_mass(self,
         initial_guess: float = None,
@@ -825,3 +821,9 @@ def search_maxima(y, height=None, dx=0, prominence=0):
     i_max = i_max[np.argsort(y[i_max])][::-1]
 
     return i_max
+
+
+
+def Gaussian_p_cst(x, C, A, x0, sigma):
+    """" Gaussian + constant function """
+    return C + A * np.exp(-(x - x0) ** 2 / (2 * sigma ** 2))
