@@ -9,7 +9,7 @@ from scipy.optimize import minimize
 from numpy import ndarray
 from scipy.optimize import curve_fit
 from scipy.signal import find_peaks
-
+from scipy import ndimage
 import matplotlib.pyplot as plt
 import casa_cube
 
@@ -19,8 +19,8 @@ class Surface:
         cube: None,
         PA: float = None,
         inc: float = None,
-        dRA: float = 0.0,
-        dDec: float = 0.0,
+        dRA: float = None,
+        dDec: float = None,
         x_star: float = None,
         y_star: float = None,
         v_syst: float = None,
@@ -74,28 +74,37 @@ class Surface:
             cube = casa_cube.Cube(cube)
         self.cube = cube
 
-        self.PA = PA
+        self.sigma = sigma
+
+        self._initial_guess()
+
         self.inc = inc
 
-        if x_star is None and y_star is None:
-            self.x_star = (cube.nx/2 +1) + (dRA*np.pi/(180 * 3600))/np.abs(cube.header['CDELT1']*np.pi/180)
-            self.y_star = (cube.ny/2 +1) + (dDec*np.pi/(180 * 3600))/np.abs(cube.header['CDELT2']*np.pi/180)
-        else:
+        if PA is not None:
+            print("Forcing PA to:", PA)
+            self.PA = PA
+
+        if v_syst is not None:
+            print("Forcing v_syst to:", v_syst)
+            self.v_syst = v_syst
+
+        if x_star is not None:
+            print("Forcing star position to: ", x_star, y_star, "(pixels)")
             self.x_star = x_star
             self.y_star = y_star
 
-        self.sigma = sigma
-        self.v_syst = v_syst
+        if dRA is not None:
+            print("Forcing star offset to: ", dRA, dDec, "(arcsec)")
+            self.x_star = (cube.nx/2 +1) + (dRA*np.pi/(180 * 3600))/np.abs(cube.header['CDELT1']*np.pi/180)
+            self.y_star = (cube.ny/2 +1) + (dDec*np.pi/(180 * 3600))/np.abs(cube.header['CDELT2']*np.pi/180)
 
         if exclude_chans is None:
             self.exclude_chans = np.array([np.abs(self.cube.velocity - self.v_syst).argmin()])
         else:
             self.exclude_chans = exclude_chans
 
-        self._initial_guess()
-
-        #self._detect_surface()
-        #self._compute_surface()
+        self._detect_surface()
+        self._compute_surface()
 
         return
 
@@ -138,7 +147,7 @@ class Surface:
         self.iv_min = iv_min
         self.iv_max = iv_max
 
-        print("Signal detected over velocity range:", self.cube.velocity[[iv_min, iv_max]])
+        print("Signal detected over velocity range:", self.cube.velocity[[iv_min, iv_max]], "km/s")
 
         # Extracting the 2 brightest channels and estimate v_syst
         im = np.where(image > 3*std, image, 0)
@@ -146,24 +155,76 @@ class Surface:
 
         profile_rms = np.std(profile[:np.maximum(iv_min,10)])
 
-        iv_peaks = search_maxima(profile, height=5*profile_rms, dx=2, prominence=0.05*np.max(profile))
-        self.iv_peaks = iv_peaks
+        dv = np.abs(self.cube.velocity[1]-self.cube.velocity[0])
+        # We have at least 0.5km/s between peaks
+        dx = np.maximum(4,int(0.5/dv))
+
+        iv_peaks = search_maxima(profile, height=10*profile_rms, dx=dx, prominence=0.2*np.max(profile))
+
+        plt.figure(1)
+        plt.clf()
+        self.cube.plot_line(threshold=3*std)
 
         if (iv_peaks.size < 2):
             print("Could not find double peaked line profile")
         if (iv_peaks.size > 2):
             print("*** WARNING: Found more than 2 peaks in the line profile : please double check estimated values")
 
-        v_syst = np.mean(self.cube.velocity[iv_peaks[:2]])
+        plt.plot(self.cube.velocity[iv_peaks], profile[iv_peaks] / self.cube._beam_area_pix(), "o")
 
-        print("Estimated systemic velocity =", v_syst)
+        # We take the 2 brightest peaks
+        iv_peaks = iv_peaks[:2]
+
+        iv_peaks = iv_peaks[np.argsort(self.cube.velocity[iv_peaks])]
+
+        self.iv_peaks = iv_peaks
+
+
+        print("Velocity of brighest channels:", self.cube.velocity[iv_peaks[:2]], "km/s")
+        self.v_syst = np.mean(self.cube.velocity[iv_peaks[:2]])
+
+        print("Estimated systemic velocity =", self.v_syst, "km/s")
 
 
         #---------------------------------
         # 3. Estimated disk orientation
         #---------------------------------
 
-        # Measure centroid
+        # Measure centroid in 2 brighest channels
+        x = np.zeros(2)
+        y = np.zeros(2)
+        for i, iv in enumerate(iv_peaks):
+            im = image[iv,:,:]
+            im = np.where(im > 3*std, im, 0)
+            c = ndimage.center_of_mass(im)
+            x[i] = c[1]
+            y[i] = c[0]
+
+        PA = np.rad2deg(np.arctan2(y[1]-y[0],x[1]-x[0])) - 90
+        self.PA = PA
+        print("Estimated PA=", PA, "deg")
+
+        #---------------------------------
+        # 3. Estimated stellar position
+        #---------------------------------
+        iv_syst = np.mean(iv_peaks[:2])
+        dv = int(np.minimum(iv_peaks[0]-iv_syst,iv_syst-iv_peaks[0])/2) - 1
+
+        iv1 = iv_peaks[1]-dv
+        iv2 = iv_peaks[0]+dv
+
+        for i, iv in enumerate([iv1,iv2]):
+            im = image[iv,:,:]
+            im = np.where(im > 3*std, im, 0)
+            c = ndimage.center_of_mass(im)
+            x[i] = c[1]
+            y[i] = c[0]
+
+        self.x_star = np.mean(x)
+        self.y_star = np.mean(y)
+
+        print("Estimated position of star:", self.x_star, self.y_star)
+
 
         return
 
@@ -195,11 +256,9 @@ class Surface:
 
         # Loop over the channels
         for iv in range(self.iv_min,self.iv_max):
-            print(iv,"/",nv-1)
+            #print(iv,"/",nv-1)
             # Rotate the image so major axis is aligned with x-axis.
-            im = np.nan_to_num(cube.image[iv,:,:])
-            if self.PA is not None:
-                im = np.array(rotate(im, self.PA - 90.0, reshape=False))
+            im = np.array(rotate(cube.image[iv,:,:], self.PA - 90.0, reshape=False))
 
             # Setting up arrays in each channel map
             in_surface = np.full(nx,False)
