@@ -140,14 +140,15 @@ class Surface:
         iv_min = nv
         iv_max = 0
         for i in range(nv):
-            if np.max(image[i,:,:]) > 7*std:
+            if np.max(image[i,:,:]) > 10*std:
                 iv_min = np.minimum(iv_min,i)
                 iv_max = np.maximum(iv_max,i)
 
         self.iv_min = iv_min
         self.iv_max = iv_max
 
-        print("Signal detected over velocity range:", self.cube.velocity[[iv_min, iv_max]], "km/s")
+        print("Signal detected over channels:", iv_min, "to", iv_max)
+        print("i.e. velocity range:", self.cube.velocity[[iv_min, iv_max]], "km/s")
 
         # Extracting the 2 brightest channels and estimate v_syst
         im = np.where(image > 3*std, image, 0)
@@ -208,10 +209,21 @@ class Surface:
         # 3. Estimated stellar position
         #---------------------------------
         iv_syst = np.mean(iv_peaks[:2])
-        dv = int(np.minimum(iv_peaks[0]-iv_syst,iv_syst-iv_peaks[0])/2) - 1
 
-        iv1 = iv_peaks[1]-dv
-        iv2 = iv_peaks[0]+dv
+        # We want at least 15 sigma to detect the star
+        iv_min = nv
+        iv_max = 0
+        for i in range(self.iv_min,self.iv_max):
+            if np.max(image[i,:,:]) > 15*std:
+                iv_min = np.minimum(iv_min,i)
+                iv_max = np.maximum(iv_max,i)
+
+        dv = np.minimum(iv_syst-iv_min, iv_max-iv_syst) - 1
+
+        print(iv_min,iv_max)
+
+        iv1 = int(iv_syst-dv)
+        iv2 = int(iv_syst+dv)
 
         for i, iv in enumerate([iv1,iv2]):
             im = image[iv,:,:]
@@ -222,7 +234,7 @@ class Surface:
 
         self.x_star = np.mean(x)
         self.y_star = np.mean(y)
-
+        print("Finding star. Using channels", iv1, iv2)
         print("Estimated position of star:", self.x_star, self.y_star, "(pixels)")
 
 
@@ -254,6 +266,15 @@ class Surface:
 
         surface_color = ["red","blue"]
 
+        # Rotate star position
+        angle = np.deg2rad(self.PA - 90.0)
+        center = (np.array(cube.image.shape[1:3])-1)/2.
+        dx = self.x_star-center[0]
+        dy = self.y_star-center[1]
+        self.x_star_rot = center[0] + dx * np.cos(angle) + dy * np.sin(angle)
+        self.y_star_rot = center[0] - dx * np.sin(angle) + dy * np.cos(angle)
+
+
         # Loop over the channels
         for iv in range(self.iv_min,self.iv_max):
             #print(iv,"/",nv-1)
@@ -267,12 +288,20 @@ class Surface:
             T_surf = np.zeros([nx,2])
             I_surf = np.zeros([nx,2])
 
+            # Selecting range
+            if (self.cube.velocity[iv] > self.v_syst):
+                i1=0
+                i2=int(np.floor(self.x_star_rot))
+            else:
+                i1=int(np.floor(self.x_star_rot))+1
+                i2=nx
+
             # Loop over the pixels along the x-axis to find surface
-            for i in range(nx):
+            for i in range(i1,i2):
                 vert_profile = im[:,i]
                 # find the maxima in each vertical cut, at signal above X sigma
                 # ignore maxima not separated by at least a beam
-                j_max = search_maxima(vert_profile, height=self.sigma*std, dx=cube.bmaj/cube.pixelscale, prominence=5*std)
+                j_max = search_maxima(vert_profile, height=self.sigma*std, dx=cube.bmaj/cube.pixelscale, prominence=2*std)
 
                 if (j_max.size>1): # We need at least 2 maxima to locate the surface
                     in_surface[i] = True
@@ -281,23 +310,23 @@ class Surface:
                     j_surf[i,:] = np.sort(j_max[:2])
 
                     # exclude maxima that do not make sense
-                    if self.y_star is not None:
-                        if (j_surf[i,1] < self.y_star):
-                            # Houston, we have a pb : the back side of the disk cannot appear below the star
-                            j_max_sup = j_max[np.where(j_max > self.y_star)]
-                            if j_max_sup.size:
-                                j_surf[i,1] = j_max_sup[0]
-                                j_surf[i,0] = j_max[0]
-                            else:
-                                in_surface[i] = False
+                    if self.y_star_rot is not None:
+                       if (j_surf[i,1] < self.y_star_rot):
+                           # Houston, we have a pb : the back side of the disk cannot appear below the star
+                           j_max_sup = j_max[np.where(j_max > self.y_star_rot)]
+                           if j_max_sup.size:
+                               j_surf[i,1] = j_max_sup[0]
+                               j_surf[i,0] = j_max[0]
+                           else:
+                               in_surface[i] = False
 
-                        if (np.mean(j_surf[i,:]) < self.y_star):
-                            # the average of the top surfaces cannot be below the star
-                            in_surface[i] = False
+                       if (np.mean(j_surf[i,:]) < self.y_star_rot):
+                           # the average of the top surfaces cannot be below the star
+                           in_surface[i] = False
 
-                        #excluding surfaces as selected by the user, or as default the closest channel to the systematic velocity
-                        if iv in self.exclude_chans:
-                            in_surface[i] = False
+                       #excluding surfaces as selected by the user, or as default the closest channel to the systematic velocity
+                       if iv in self.exclude_chans:
+                           in_surface[i] = False
 
                     #-- We find a spatial quadratic to refine position of maxima (like bettermoment does in velocity)
                     for k in range(2):
@@ -393,17 +422,17 @@ class Surface:
         inc_rad = np.radians(self.inc)
 
         #-- Computing the radius and height for each point
-        y_f = self.y_sky[:,:,1] - self.y_star   # far side, y[channel number, x index]
-        y_n = self.y_sky[:,:,0] - self.y_star   # near side
+        y_f = self.y_sky[:,:,1] - self.y_star_rot   # far side, y[channel number, x index]
+        y_n = self.y_sky[:,:,0] - self.y_star_rot   # near side
         y_c = 0.5 * (y_f + y_n)
         #y_c = np.ma.masked_array(y_c,mask).compressed()
 
-        x = self.x_sky - self.x_star
+        x = self.x_sky - self.x_star_rot
         y = (y_f - y_c) / np.cos(inc_rad)
 
         r = np.hypot(x,y) # Note : does not depend on y_star
         h = y_c / np.sin(inc_rad)
-        v = (self.cube.velocity[:,np.newaxis] - self.v_syst) * r / ((self.x_sky - self.x_star) * np.sin(inc_rad)) # does not depend on y_star
+        v = (self.cube.velocity[:,np.newaxis] - self.v_syst) * r / ((self.x_sky - self.x_star_rot) * np.sin(inc_rad)) # does not depend on y_star
 
         r *= self.cube.pixelscale
         h *= self.cube.pixelscale
@@ -611,6 +640,7 @@ class Surface:
             #ax.set_xlim(np.min(x[iv,:n_surf[iv]]) - 10*cube.bmaj/cube.pixelscale,np.max(x[iv,:n_surf[iv]]) + 10*cube.bmaj/cube.pixelscale)
             #ax.set_ylim(np.min(y[iv,:n_surf[iv],:]) - 10*cube.bmaj/cube.pixelscale,np.max(y[iv,:n_surf[iv],:]) + 10*cube.bmaj/cube.pixelscale)
 
+        ax.plot(self.x_star_rot,self.y_star_rot,"o",color="magenta",ms=1)
 
     def plot_channels(self,n=20, win=21, radius=1.0, iv_min=None, iv_max=None):
 
