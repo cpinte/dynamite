@@ -1,11 +1,11 @@
-from scipy.ndimage import rotate, shift
+from scipy.ndimage import rotate
 from scipy.interpolate import interp1d
 import scipy.constants as sc
 import astropy.constants as ac
 import numpy as np
 from matplotlib.backends.backend_pdf import PdfPages
 from scipy.stats import binned_statistic
-from scipy.optimize import minimize
+from scipy.optimize import minimize, curve_fit
 from numpy import ndarray
 from scipy.optimize import curve_fit
 from scipy.signal import find_peaks
@@ -72,6 +72,7 @@ class Surface:
         '''
 
         if isinstance(cube,str):
+            print("Reading cube ...")
             cube = casa_cube.Cube(cube)
         self.cube = cube
 
@@ -115,6 +116,8 @@ class Surface:
 
         """
 
+        print("Starting initial guess")
+
         #----------------------------
         # 1. Noise properties
         #----------------------------
@@ -153,7 +156,7 @@ class Surface:
 
         # Extracting the 2 brightest channels and estimate v_syst
         im = np.where(image > 3*std, image, 0)
-        profile = np.sum(im, axis=(1,2))
+        profile = np.sum(im, axis=(1,2)) / self.cube._beam_area_pix()
 
         profile_rms = np.std(profile[:np.maximum(iv_min,10)])
 
@@ -171,22 +174,40 @@ class Surface:
             print("Could not find double peaked line profile")
         if (iv_peaks.size > 2):
             print("*** WARNING: Found more than 2 peaks in the line profile : please double check estimated values")
-
-        plt.plot(self.cube.velocity[iv_peaks], profile[iv_peaks] / self.cube._beam_area_pix(), "o")
+        #plt.plot(self.cube.velocity[iv_peaks], profile[iv_peaks], "o")
 
         # We take the 2 brightest peaks, and we sort them in velocity
         iv_peaks = iv_peaks[:2]
         iv_peaks = iv_peaks[np.argsort(self.cube.velocity[iv_peaks])]
         self.iv_peaks = iv_peaks
 
-        # Refine peak position by fitting a Gaussian
-
         print("Brighest channels are :", iv_peaks[:2])
         print("Velocity of brighest channels:", self.cube.velocity[iv_peaks[:2]], "km/s")
         self.delta_v_peaks = self.cube.velocity[iv_peaks[1]] - self.cube.velocity[iv_peaks[0]]
-        self.v_syst = np.mean(self.cube.velocity[iv_peaks[:2]])
+
+        # Refine peak position by fitting a Gaussian
+        div = np.ceil(0.25 * (iv_peaks[1]-iv_peaks[0])).astype(int)
+        v_peaks=np.zeros(2)
+        for i in range(2):
+            x = self.cube.velocity[iv_peaks[i]-div:iv_peaks[i]+div+1]
+            y = profile[iv_peaks[i]-div:iv_peaks[i]+div+1]
+
+            p0 = [0.5*np.max(y), 0.5*np.max(y), self.cube.velocity[iv_peaks[i]], np.minimum(self.delta_v_peaks,0.2)]
+            #plt.plot(x,Gaussian_p_cst(x,p0[0],p0[1],p0[2],p0[3]), color="red")
+
+            p, _ = curve_fit(Gaussian_p_cst,x,y,sigma=1/np.sqrt(y), p0=p0)
+            v_peaks[i] = p[2]
+
+            x2=np.linspace(np.min(x),np.max(x),100)
+            plt.plot(x2,Gaussian_p_cst(x2,p[0],p[1],p[2],p[3]), color="grey", linestyle="--", lw=1)
+
+        self.v_peaks = v_peaks
+
+
+        self.v_syst = np.mean(self.v_peaks)
         print("Estimated systemic velocity =", self.v_syst, "km/s")
 
+        plt.plot([self.v_syst,self.v_syst], [0.,1.05*np.max(profile)], lw=1, color="black", alpha=0.5)
 
         #---------------------------------
         # 3. Estimated disk orientation
@@ -206,6 +227,17 @@ class Surface:
         self.PA = PA
         print("Estimated PA=", PA, "deg")
 
+        num=2
+        if (plt.fignum_exists(num)):
+            plt.figure(num)
+            plt.clf()
+        fig2, axes2 = plt.subplots(nrows=1,ncols=2,num=num,figsize=(12,5),sharex=True,sharey=True)
+        c=["blue","red"]
+        for i in range(2):
+            ax = axes2[i]
+            self.cube.plot(iv=iv_peaks[i],ax=ax,axes_unit="pixel")
+            ax.plot(x[i],y[i],"o",color=c[i],ms=2)
+
         #---------------------------------
         # 3. Estimated stellar position
         #---------------------------------
@@ -221,14 +253,18 @@ class Surface:
 
         dv = np.minimum(iv_syst-iv_min, iv_max-iv_syst) - 1
 
-        print(iv_min,iv_max)
+
 
         iv1 = int(iv_syst-dv)
         iv2 = int(iv_syst+dv)
 
+        plt.figure(1)
+        plt.plot(self.cube.velocity[[iv1,iv2]], profile[[iv1,iv2]], "o")
+        plt.xlim(self.cube.velocity[iv1]-0.5,self.cube.velocity[iv2]+0.5)
+
         for i, iv in enumerate([iv1,iv2]):
             im = image[iv,:,:]
-            im = np.where(im > 3*std, im, 0)
+            im = np.where(im > 7*std, im, 0)
             c = ndimage.center_of_mass(im)
             x[i] = c[1]
             y[i] = c[0]
@@ -238,6 +274,20 @@ class Surface:
         print("Finding star. Using channels", iv1, iv2)
         print("Estimated position of star:", self.x_star, self.y_star, "(pixels)")
 
+        num=3
+        if (plt.fignum_exists(num)):
+            plt.figure(num)
+            plt.clf()
+        fig3, axes3 = plt.subplots(nrows=1,ncols=2,num=num,figsize=(12,5),sharex=True,sharey=True)
+        for i in range(2):
+            ax = axes3[i]
+            self.cube.plot(iv=[iv1,iv2][i],ax=ax,axes_unit="pixel")
+            ax.plot(x[i],y[i],"o",color="cyan",ms=2)
+            ax.plot(self.x_star,self.y_star,"o",color="magenta",ms=2)
+
+        for i in range(2):
+            ax = axes2[i]
+            ax.plot(self.x_star,self.y_star,"*",color="white",ms=1)
 
         return
 
@@ -277,7 +327,7 @@ class Surface:
 
 
         # Loop over the channels
-        with alive_bar(int(self.iv_max-self.iv_min)) as bar:
+        with alive_bar(int(self.iv_max-self.iv_min), title="Extracting surfaces") as bar:
             for iv in range(self.iv_min,self.iv_max):
                 #print(iv,"/",nv-1)
                 # Rotate the image so major axis is aligned with x-axis.
