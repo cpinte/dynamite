@@ -25,7 +25,7 @@ class Surface:
         x_star: float = None,
         y_star: float = None,
         v_syst: float = None,
-        sigma: float = 5,
+        sigma: float = 10,
         exclude_chans: ndarray = None,
         **kwargs):
         '''
@@ -183,7 +183,6 @@ class Surface:
 
         print("Brighest channels are :", iv_peaks[:2])
         print("Velocity of brighest channels:", self.cube.velocity[iv_peaks[:2]], "km/s")
-        self.delta_v_peaks = self.cube.velocity[iv_peaks[1]] - self.cube.velocity[iv_peaks[0]]
 
         # Refine peak position by fitting a Gaussian
         div = np.ceil(0.25 * (iv_peaks[1]-iv_peaks[0])).astype(int)
@@ -192,17 +191,19 @@ class Surface:
             x = self.cube.velocity[iv_peaks[i]-div:iv_peaks[i]+div+1]
             y = profile[iv_peaks[i]-div:iv_peaks[i]+div+1]
 
-            p0 = [0.5*np.max(y), 0.5*np.max(y), self.cube.velocity[iv_peaks[i]], np.minimum(self.delta_v_peaks,0.2)]
+            p0 = [0.5*np.max(y), 0.5*np.max(y), self.cube.velocity[iv_peaks[i]], np.minimum(self.cube.velocity[iv_peaks[1]] - self.cube.velocity[iv_peaks[0]],0.2)]
             #plt.plot(x,Gaussian_p_cst(x,p0[0],p0[1],p0[2],p0[3]), color="red")
 
             p, _ = curve_fit(Gaussian_p_cst,x,y,sigma=1/np.sqrt(y), p0=p0)
             v_peaks[i] = p[2]
 
             x2=np.linspace(np.min(x),np.max(x),100)
-            plt.plot(x2,Gaussian_p_cst(x2,p[0],p[1],p[2],p[3]), color="grey", linestyle="--", lw=1)
+            plt.plot(x2,Gaussian_p_cst(x2,p[0],p[1],p[2],p[3]), color="C3", linestyle="--", lw=1)
 
         self.v_peaks = v_peaks
+        self.delta_v_peaks = v_peaks[1] - v_peaks[0]
 
+        print("Velocity of peaks:", v_peaks, "km/s")
 
         self.v_syst = np.mean(self.v_peaks)
         print("Estimated systemic velocity =", self.v_syst, "km/s")
@@ -232,16 +233,17 @@ class Surface:
             plt.figure(num)
             plt.clf()
         fig2, axes2 = plt.subplots(nrows=1,ncols=2,num=num,figsize=(12,5),sharex=True,sharey=True)
-        c=["blue","red"]
+        color=["C0","C3"]
         for i in range(2):
             ax = axes2[i]
             self.cube.plot(iv=iv_peaks[i],ax=ax,axes_unit="pixel")
-            ax.plot(x[i],y[i],"o",color=c[i],ms=2)
+            ax.plot(x[i],y[i],"o",color=color[i],ms=3)
+            ax.plot(x[i],y[i],"o",color="white",ms=1)
 
         #---------------------------------
         # 3. Estimated stellar position
         #---------------------------------
-        iv_syst = np.mean(iv_peaks[:2])
+        iv_syst = np.argmin(np.abs(self.cube.velocity - self.v_syst))
 
         # We want at least 15 sigma to detect the star
         iv_min = nv
@@ -252,8 +254,6 @@ class Surface:
                 iv_max = np.maximum(iv_max,i)
 
         dv = np.minimum(iv_syst-iv_min, iv_max-iv_syst) - 1
-
-
 
         iv1 = int(iv_syst-dv)
         iv2 = int(iv_syst+dv)
@@ -282,12 +282,12 @@ class Surface:
         for i in range(2):
             ax = axes3[i]
             self.cube.plot(iv=[iv1,iv2][i],ax=ax,axes_unit="pixel")
-            ax.plot(x[i],y[i],"o",color="cyan",ms=2)
-            ax.plot(self.x_star,self.y_star,"o",color="magenta",ms=2)
+            ax.plot(x[i],y[i],"o",color=color[i],ms=2)
+            ax.plot(self.x_star,self.y_star,"*",color="white",ms=3)
 
         for i in range(2):
             ax = axes2[i]
-            ax.plot(self.x_star,self.y_star,"*",color="white",ms=1)
+            ax.plot(self.x_star,self.y_star,"*",color="white",ms=3)
 
         return
 
@@ -361,24 +361,24 @@ class Surface:
                         # indices of the back and front side
                         j_surf[i,:] = np.sort(j_max[:2])
 
-                        # exclude maxima that do not make sense
-                        if self.y_star_rot is not None:
-                           if (j_surf[i,1] < self.y_star_rot):
-                               # Houston, we have a pb : the back side of the disk cannot appear below the star
-                               j_max_sup = j_max[np.where(j_max > self.y_star_rot)]
-                               if j_max_sup.size:
-                                   j_surf[i,1] = j_max_sup[0]
-                                   j_surf[i,0] = j_max[0]
-                               else:
-                                   in_surface[i] = False
-
-                           if (np.mean(j_surf[i,:]) < self.y_star_rot):
-                               # the average of the top surfaces cannot be below the star
-                               in_surface[i] = False
-
-                           #excluding surfaces as selected by the user, or as default the closest channel to the systematic velocity
-                           if iv in self.exclude_chans:
-                               in_surface[i] = False
+                        # exclude maxima that do not make sense : only works if upper surface is at the top
+                        #if self.y_star_rot is not None:
+                        #   if (j_surf[i,1] < self.y_star_rot):
+                        #       # Houston, we have a pb : the back side of the disk cannot appear below the star
+                        #       j_max_sup = j_max[np.where(j_max > self.y_star_rot)]
+                        #       if j_max_sup.size:
+                        #           j_surf[i,1] = j_max_sup[0]
+                        #           j_surf[i,0] = j_max[0]
+                        #       else:
+                        #           in_surface[i] = False
+                        #
+                        #   if (np.mean(j_surf[i,:]) < self.y_star_rot):
+                        #       # the average of the top surfaces cannot be below the star
+                        #       in_surface[i] = False
+                        #
+                        #   #excluding surfaces as selected by the user, or as default the closest channel to the systematic velocity
+                        #   if iv in self.exclude_chans:
+                        #       in_surface[i] = False
 
                         #-- We find a spatial quadratic to refine position of maxima (like bettermoment does in velocity)
                         for k in range(2):
@@ -486,14 +486,23 @@ class Surface:
 
         r = np.hypot(x,y) # Note : does not depend on y_star
         h = y_c / np.sin(inc_rad)
-        v = (self.cube.velocity[:,np.newaxis] - self.v_syst) * r / ((self.x_sky - self.x_star_rot) * np.sin(inc_rad)) # does not depend on y_star
+        # -- If the disc is oriented the other way
+        if (np.mean(h) < 0) :
+            h = -h
+
+        v = (self.cube.velocity[:,np.newaxis] - self.v_syst) * r / (x * np.sin(inc_rad)) # does not depend on y_star
+
+        dv = (self.cube.velocity[:,np.newaxis] - self.v_syst) * (r/r)
 
         r *= self.cube.pixelscale
         h *= self.cube.pixelscale
 
+        # We eliminate the point where there is no detection
+        mask = self.x_sky < 1
+
         # -- we remove the points with h<0 (they correspond to values set to 0 in y)
         # and where v is not defined
-        mask = (h<0) | np.isinf(v) | np.isnan(v)
+        mask = mask | (h<0) | np.isinf(v) | np.isnan(v)
 
         # -- we remove channels that are too close to the systemic velocity
         mask = mask | (np.abs(self.cube.velocity - self.v_syst) < 0.25*self.delta_v_peaks)[:,np.newaxis]
@@ -501,6 +510,7 @@ class Surface:
         r = np.ma.masked_array(r,mask)
         h = np.ma.masked_array(h,mask)
         v = np.ma.masked_array(v,mask)
+        dv = np.ma.masked_array(dv,mask)
 
         # -- If the disc rotates in the opposite direction as expected
         if (np.mean(v) < 0):
@@ -512,7 +522,7 @@ class Surface:
         self.r = r
         self.h = h
         self.v = v
-
+        self.dv = dv
 
     def plot_surfaces(self,
         nbins: int = 30,
@@ -560,6 +570,7 @@ class Surface:
         r = self.r
         h = self.h
         v = self.v
+        dv = np.abs(self.dv)
         T = np.mean(self.Tb[:,:,:],axis=2)
 
         r_data = r.ravel().compressed()#[np.invert(mask.ravel())]
@@ -576,13 +587,12 @@ class Surface:
                 ax.append(fig.add_subplot(gs[i,j]))
 
         #Altitude
-
-        ax[0].scatter(r.ravel(),h.ravel(),alpha=0.5,s=10,color="grey",marker='o', label = 'data')
+        ax[0].scatter(r.ravel(),h.ravel(),alpha=0.2,s=10, c=dv.ravel(), marker='o', label = 'data', cmap="jet")
 
         bins, _, _ = binned_statistic(r_data,[r_data,h_data], bins=nbins)
         std, _, _  = binned_statistic(r_data,h_data, 'std', bins=nbins)
 
-        ax[0].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="red", fmt='o', mec='k', mfc='red', ms=3, elinewidth=2, label='Binned data')
+        ax[0].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="grey", fmt='o', mec='k', mfc='grey', ms=3, elinewidth=2, label='Binned data')
 
         if plot_power_law:
             #-- fitting a power-law
@@ -604,12 +614,12 @@ class Surface:
 
 
         #Velocity
-        ax[1].scatter(r.ravel(),v.ravel(),alpha=0.5,s=10,color="grey",marker='o', label = 'Data')
+        ax[1].scatter(r.ravel(),v.ravel(),alpha=0.2,s=10,c=dv.ravel(),marker='o', label = 'Data',cmap="jet")
 
         bins, _, _ = binned_statistic(r_data,[r_data,v_data], bins=nbins)
         std, _, _  = binned_statistic(r_data,v_data, 'std', bins=nbins)
 
-        ax[1].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="red", fmt='o', mec='k', mfc='red', ms=3, elinewidth=2, label='Binned data')
+        ax[1].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="grey", fmt='o', mec='k', mfc='grey', ms=3, elinewidth=2, label='Binned data')
 
         if m_star:
             if (dist is None):
@@ -630,12 +640,12 @@ class Surface:
 
         #Temperature
 
-        ax[2].scatter(r.ravel(),T.ravel(),alpha=0.5,s=10,color="grey",marker='o')
+        ax[2].scatter(r.ravel(),T.ravel(),alpha=0.5,s=10,c=dv.ravel(),marker='o',cmap="jet")
 
         bins, _, _ = binned_statistic(r_data,[r_data,T_data], bins=nbins)
         std, _, _  = binned_statistic(r_data,T_data, 'std', bins=nbins)
 
-        ax[2].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="red", fmt='o', mec='k', mfc='red', ms=3, elinewidth=2)
+        ax[2].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="grey", fmt='o', mec='k', mfc='grey', ms=3, elinewidth=2)
 
         ax[0].set_ylabel('Height (")')
         ax[1].set_ylabel('Velocity (km/s)')
