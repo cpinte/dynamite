@@ -294,10 +294,15 @@ class Surface:
 
             ax.plot(np.mean(x),np.mean(y),"o",color="magenta",ms=4)
 
-        # Measure sign of inclination from average of 2 centroid
-        # Cross product with red shifted side
+        # Measure sign of inclination from average of 2 centroid, using a cross product with red shifted side
+        # positive inclination means that the near side of the upper surface is at the bottom of the map when the red-shifted side is to the right
         self.is_inc_positive = (np.mean(x)-x_star)*(y[1]-y_star) - (np.mean(y)-y_star)*(x[1]-x_star) > 0.
-        print("is inclination angle positive ?", self.is_inc_positive)
+
+        if self.is_inc_positive:
+            print("inclination angle is positive")
+        else:
+            print("inclination angle is negative")
+
         if self.is_inc_positive:
             self.inc_sign = 1
         else:
@@ -331,7 +336,7 @@ class Surface:
         surface_color = ["red","blue"]
 
         # Rotate star position
-        angle = np.deg2rad(self.PA - 90.0)
+        angle = np.deg2rad(self.PA - self.inc_sign * 90.0)
         center = (np.array(cube.image.shape[1:3])-1)/2.
         dx = self.x_star-center[0]
         dy = self.y_star-center[1]
@@ -365,8 +370,8 @@ class Surface:
         cube = self.cube
         nx = cube.nx
 
-        # Rotate the image so major axis is aligned with x-axis.
-        im = np.array(rotate(cube.image[iv,:,:], self.PA - 90.0, reshape=False))
+        # Rotate the image so major axis is aligned with x-axis, and the far side is at the top
+        im = np.array(rotate(cube.image[iv,:,:], self.PA - self.inc_sign * 90.0, reshape=False))
 
         # Setting up arrays in each channel map
         in_surface = np.full(nx,False)
@@ -376,7 +381,7 @@ class Surface:
         I_surf = np.zeros([nx,2])
 
         # Selecting range of pixels to explore depending on velocity (ie 1 side of the disk only)
-        if (self.cube.velocity[iv] > self.v_syst):
+        if (self.cube.velocity[iv] - self.v_syst) * self.inc_sign > 0:
             i1=0
             i2=int(np.floor(self.x_star_rot))
         else:
@@ -384,6 +389,7 @@ class Surface:
             i2=nx
 
         # Loop over the pixels along the x-axis to find surface
+        #print("i12", i1, i2)
         for i in range(i1,i2):
             vert_profile = im[:,i]
             # find the maxima in each vertical cut, at signal above X sigma
@@ -393,13 +399,18 @@ class Surface:
             if (j_max.size>1): # We need at least 2 maxima to locate the surface
                 in_surface[i] = True
 
-                # indices of the back and front side
+                # indices of the near [0] and far [1] sides of upper surface
                 j_surf[i,:] = np.sort(j_max[:2])
 
-                # exclude maxima that do not make sense : only works if upper surface is at the top
+
+                #print("------------------------------")
+                #print(i, "j_surf", j_surf[i,:])
+
                 try_to_clean = False
+                # exclude maxima that do not make sense : only works if upper surface is at the top
                 if try_to_clean:
-                    if ( self.inc_sign * (j_surf[i,1] - self.y_star_rot) < 0):
+                    if j_surf[i,1] - self.y_star_rot < 0:
+                        print("pb 1 iv=", iv, "i=", i, "j=", j_surf[i,1])
                         # Houston, we have a pb : the back side of the disk cannot appear below the star
                         j_max_sup = j_max[np.where(j_max > self.y_star_rot)]
                         if j_max_sup.size:
@@ -408,12 +419,14 @@ class Surface:
                         else:
                             in_surface[i] = False
 
-                    if (self.inc_sign * (np.mean(j_surf[i,:]) - self.y_star_rot) < 0):
+                    if np.mean(j_surf[i,:]) - self.y_star_rot < 0:
+                        print("pb 2 iv=", iv, "i=", i, "j=", j_surf[i,:])
                         # the average of the top surfaces cannot be below the star
                         in_surface[i] = False
 
                     #excluding surfaces as selected by the user, or as default the closest channel to the systematic velocity
                     if iv in self.exclude_chans:
+                        print("pb 3")
                         in_surface[i] = False
 
                 #-- We find a spatial quadratic to refine position of maxima (like bettermoment does in velocity)
@@ -459,7 +472,7 @@ class Surface:
                 # plt.plot(x_plot, P[1] + P[0]*x_plot)
 
                 #in_surface_tmp = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) # test only front surface
-                in_surface_tmp = in_surface #&  (j_surf_exact[:,0] < (P[1] + P[0]*x)) & (j_surf_exact[:,1] > (P[1] + P[0]*x))
+                in_surface_tmp = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) & (j_surf_exact[:,1] > (P[1] + P[0]*x))
 
                 # We remove the weird point and reddo the fit again to ensure the slope we use is not too bad
                 x1 = x[in_surface_tmp]
@@ -467,7 +480,7 @@ class Surface:
                 P = np.polyfit(x1,y1,1)
 
                 #in_surface = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) # test only front surface
-                in_surface = in_surface #& (j_surf_exact[:,0] < (P[1] + P[0]*x)) & (j_surf_exact[:,1] > (P[1] + P[0]*x))
+                in_surface = in_surface & (j_surf_exact[:,0] < (P[1] + P[0]*x)) & (j_surf_exact[:,1] > (P[1] + P[0]*x))
 
             #-- test if we have points on both side of the star
             # - remove side with the less points
@@ -515,8 +528,8 @@ class Surface:
         h = y_c / np.sin(inc_rad)
 
         # -- If the disc is oriented the other way
-        if not self.is_inc_positive :
-            h = -h
+        #if not self.is_inc_positive :
+        #    h = -h
 
         v = (self.cube.velocity[:,np.newaxis] - self.v_syst) * r / (x * np.sin(inc_rad)) # does not depend on y_star
 
@@ -688,10 +701,13 @@ class Surface:
 
         return
 
-    def plot_channel(self, iv, win=20, radius=3.0, ax=None):
+    def plot_channel(self, iv, win=20, radius=3.0, ax=None, clear=True):
 
         if ax is None:
             ax = plt.gca()
+
+        if clear:
+            ax.cla()
 
         cube = self.cube
         x = self.x_sky
@@ -700,7 +716,7 @@ class Surface:
 
         im = np.nan_to_num(cube.image[iv,:,:])
         if self.PA is not None:
-            im = np.array(rotate(im, self.PA - 90.0, reshape=False))
+            im = np.array(rotate(im, self.PA - self.inc_sign * 90.0, reshape=False))
 
         pix_size = cube.header['CDELT2']*3600
 
@@ -737,7 +753,7 @@ class Surface:
         if (plt.fignum_exists(num)):
             plt.figure(num)
             plt.clf()
-        fig, axs = plt.subplots(ncols=5, nrows=nrows, figsize=(11, 2*nrows+1),constrained_layout=True,num=num)
+        fig, axs = plt.subplots(ncols=5, nrows=nrows, figsize=(11, 2*nrows+1),constrained_layout=True,num=num, clear=False)
 
         for i, ax in enumerate(axs.flatten()):
             self.plot_channel(int(iv_min+i*dv), radius=radius, ax=ax)
