@@ -210,35 +210,6 @@ class Surface:
 
         plt.plot([self.v_syst,self.v_syst], [0.,1.05*np.max(profile)], lw=1, color="black", alpha=0.5)
 
-        #---------------------------------
-        # 3. Estimated disk orientation
-        #---------------------------------
-
-        # Measure centroid in 2 brighest channels
-        x = np.zeros(2)
-        y = np.zeros(2)
-        for i, iv in enumerate(iv_peaks):
-            im = image[iv,:,:]
-            im = np.where(im > 3*std, im, 0)
-            c = ndimage.center_of_mass(im)
-            x[i] = c[1]
-            y[i] = c[0]
-
-        PA = np.rad2deg(np.arctan2(y[1]-y[0],x[1]-x[0])) - 90
-        self.PA = PA
-        print("Estimated PA=", PA, "deg")
-
-        num=2
-        if (plt.fignum_exists(num)):
-            plt.figure(num)
-            plt.clf()
-        fig2, axes2 = plt.subplots(nrows=1,ncols=2,num=num,figsize=(12,5),sharex=True,sharey=True)
-        color=["C0","C3"]
-        for i in range(2):
-            ax = axes2[i]
-            self.cube.plot(iv=iv_peaks[i],ax=ax,axes_unit="pixel")
-            ax.plot(x[i],y[i],"o",color=color[i],ms=3)
-            ax.plot(x[i],y[i],"o",color="white",ms=1)
 
         #---------------------------------
         # 3. Estimated stellar position
@@ -262,6 +233,8 @@ class Surface:
         plt.plot(self.cube.velocity[[iv1,iv2]], profile[[iv1,iv2]], "o")
         plt.xlim(self.cube.velocity[iv1]-0.5,self.cube.velocity[iv2]+0.5)
 
+        x = np.zeros(2)
+        y = np.zeros(2)
         for i, iv in enumerate([iv1,iv2]):
             im = image[iv,:,:]
             im = np.where(im > 7*std, im, 0)
@@ -269,10 +242,42 @@ class Surface:
             x[i] = c[1]
             y[i] = c[0]
 
-        self.x_star = np.mean(x)
-        self.y_star = np.mean(y)
+        x_star = np.mean(x)
+        y_star = np.mean(y)
+        self.x_star = x_star
+        self.y_star = y_star
         print("Finding star. Using channels", iv1, iv2)
-        print("Estimated position of star:", self.x_star, self.y_star, "(pixels)")
+        print("Estimated position of star:", x_star, y_star, "(pixels)")
+
+        color=["C0","C3"] # ie blue and red
+        num=2
+        if (plt.fignum_exists(num)):
+            plt.figure(num)
+            plt.clf()
+        fig2, axes2 = plt.subplots(nrows=1,ncols=2,num=num,figsize=(12,5),sharex=True,sharey=True)
+        for i in range(2):
+            ax = axes2[i]
+            self.cube.plot(iv=[iv1,iv2][i],ax=ax,axes_unit="pixel")
+            ax.plot(x[i],y[i],"o",color=color[i],ms=2)
+            ax.plot(self.x_star,self.y_star,"*",color="white",ms=3)
+
+        #---------------------------------
+        # 4. Estimated disk orientation
+        #---------------------------------
+
+        # Measure centroid in 2 brighest channels
+        x = np.zeros(2)
+        y = np.zeros(2)
+        for i, iv in enumerate(iv_peaks):
+            im = image[iv,:,:]
+            im = np.where(im > 3*std, im, 0)
+            c = ndimage.center_of_mass(im)
+            x[i] = c[1]
+            y[i] = c[0]
+
+        PA = np.rad2deg(np.arctan2(y[1]-y[0],x[1]-x[0])) - 90
+        self.PA = PA
+        print("Estimated PA of red shifted side =", PA, "deg")
 
         num=3
         if (plt.fignum_exists(num)):
@@ -281,13 +286,18 @@ class Surface:
         fig3, axes3 = plt.subplots(nrows=1,ncols=2,num=num,figsize=(12,5),sharex=True,sharey=True)
         for i in range(2):
             ax = axes3[i]
-            self.cube.plot(iv=[iv1,iv2][i],ax=ax,axes_unit="pixel")
-            ax.plot(x[i],y[i],"o",color=color[i],ms=2)
+            self.cube.plot(iv=iv_peaks[i],ax=ax,axes_unit="pixel")
+            ax.plot(x[i],y[i],"o",color=color[i],ms=4)
+            ax.plot(x[i],y[i],"o",color="white",ms=2)
+
             ax.plot(self.x_star,self.y_star,"*",color="white",ms=3)
 
-        for i in range(2):
-            ax = axes2[i]
-            ax.plot(self.x_star,self.y_star,"*",color="white",ms=3)
+            ax.plot(np.mean(x),np.mean(y),"o",color="magenta",ms=4)
+
+        # Measure sign of inclination from average of 2 centroid
+        # Cross product with red shifted side
+        self.is_inc_positive = (np.mean(x)-x_star)*(y[1]-y_star) - (np.mean(y)-y_star)*(x[1]-x_star) > 0.
+        print("is inclination angle positive ?", self.is_inc_positive)
 
         return
 
@@ -486,8 +496,9 @@ class Surface:
 
         r = np.hypot(x,y) # Note : does not depend on y_star
         h = y_c / np.sin(inc_rad)
+
         # -- If the disc is oriented the other way
-        if (np.mean(h) < 0) :
+        if not self.is_inc_positive :
             h = -h
 
         v = (self.cube.velocity[:,np.newaxis] - self.v_syst) * r / (x * np.sin(inc_rad)) # does not depend on y_star
@@ -514,6 +525,7 @@ class Surface:
 
         # -- If the disc rotates in the opposite direction as expected
         if (np.mean(v) < 0):
+            print("Negative velocities !!")
             v = -v
 
         # -- Todo : optimize position, inclination (is that posible without a model ?), PA (need to re-run detect surface)
@@ -587,7 +599,7 @@ class Surface:
                 ax.append(fig.add_subplot(gs[i,j]))
 
         #Altitude
-        ax[0].scatter(r.ravel(),h.ravel(),alpha=0.2,s=10, c=dv.ravel(), marker='o', label = 'data', cmap="jet")
+        ax[0].scatter(r.ravel(),h.ravel(),alpha=0.2,s=3, c=dv.ravel(), marker='o', label = 'data', cmap="jet")
 
         bins, _, _ = binned_statistic(r_data,[r_data,h_data], bins=nbins)
         std, _, _  = binned_statistic(r_data,h_data, 'std', bins=nbins)
@@ -614,7 +626,7 @@ class Surface:
 
 
         #Velocity
-        ax[1].scatter(r.ravel(),v.ravel(),alpha=0.2,s=10,c=dv.ravel(),marker='o', label = 'Data',cmap="jet")
+        ax[1].scatter(r.ravel(),v.ravel(),alpha=0.2,s=3,c=dv.ravel(),marker='o', label = 'Data',cmap="jet")
 
         bins, _, _ = binned_statistic(r_data,[r_data,v_data], bins=nbins)
         std, _, _  = binned_statistic(r_data,v_data, 'std', bins=nbins)
@@ -625,7 +637,7 @@ class Surface:
             if (dist is None):
                 raise ValueError("dist must be provided")
             v_model = self._keplerian_disc(m_star, dist)
-            ax[1].scatter(r_data, v_model,alpha=0.5,s=10,color="blue",marker='o', label = 'Kep model')
+            ax[1].scatter(r_data, v_model,alpha=0.5,s=3,color="blue",marker='o', label = 'Kep model')
 
         if m_star_h_func:
             if (dist is None):
@@ -639,8 +651,7 @@ class Surface:
             ax[1].plot(x, v_mod,alpha=0.75, ls='--',color="purple", label = 'Kep model w h_func')
 
         #Temperature
-
-        ax[2].scatter(r.ravel(),T.ravel(),alpha=0.5,s=10,c=dv.ravel(),marker='o',cmap="jet")
+        ax[2].scatter(r.ravel(),T.ravel(),alpha=0.5,s=3,c=dv.ravel(),marker='o',cmap="jet")
 
         bins, _, _ = binned_statistic(r_data,[r_data,T_data], bins=nbins)
         std, _, _  = binned_statistic(r_data,T_data, 'std', bins=nbins)
@@ -687,11 +698,9 @@ class Surface:
 
         pix_size = cube.header['CDELT2']*3600
 
-        extent = (cube.nx/2 + radius/pix_size, cube.nx/2 - radius/pix_size, cube.ny/2 - radius/pix_size, cube.ny/2 + radius/pix_size)
-
         ax.imshow(im, origin="lower", cmap='binary_r')#, interpolation="bilinear")
-        ax.set_xlim(cube.nx/2 + radius/pix_size, cube.nx/2 - radius/pix_size)
-        ax.set_ylim(cube.ny/2 - radius/pix_size, cube.ny/2 + radius/pix_size)
+        #ax.set_xlim(cube.nx/2 + radius/pix_size, cube.nx/2 - radius/pix_size)
+        #ax.set_ylim(cube.ny/2 - radius/pix_size, cube.ny/2 + radius/pix_size)
         #ax.tick_params(axis='both', direction='out', labelbottom=False, labelleft=False, labeltop=False, labelright=False)
         ax.set_title(r'$\Delta$v='+"{:.2f}".format(cube.velocity[iv])+' , id:'+str(iv), color='k')
 
