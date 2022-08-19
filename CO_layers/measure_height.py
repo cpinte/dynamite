@@ -401,8 +401,8 @@ class Surface:
                 # exclude maxima that do not make sense : only works if upper surface is at the top
                 if try_to_clean:
                     if j_surf[i,1] - self.y_star_rot < 0:
-                        print("pb 1 iv=", iv, "i=", i, "j=", j_surf[i,1])
-                        # Houston, we have a pb : the back side of the disk cannot appear below the star
+                        #print("pb 1 iv=", iv, "i=", i, "j=", j_surf[i,1])
+                        # Houston, we have a pb : the far side of the disk cannot appear below the star
                         j_max_sup = j_max[np.where(j_max > self.y_star_rot)]
                         if j_max_sup.size:
                             j_surf[i,1] = j_max_sup[0]
@@ -411,7 +411,7 @@ class Surface:
                             in_surface[i] = False
 
                     if np.mean(j_surf[i,:]) - self.y_star_rot < 0:
-                        print("pb 2 iv=", iv, "i=", i, "j=", j_surf[i,:])
+                        #print("pb 2 iv=", iv, "i=", i, "j=", j_surf[i,:])
                         # the average of the top surfaces cannot be below the star
                         in_surface[i] = False
 
