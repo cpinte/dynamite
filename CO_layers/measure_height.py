@@ -26,7 +26,6 @@ class Surface:
         y_star: float = None,
         v_syst: float = None,
         sigma: float = 10,
-        exclude_chans: ndarray = None,
         **kwargs):
         '''
         Parameters
@@ -51,9 +50,6 @@ class Surface:
             mask channels within a certain km/s range of the systematic velocity
         sigma
             cutt off threshold to fit surface
-        exclude_chans
-            Excludes channels based on the channel ID chosen by the user. By default, if no channels
-            are selected the code will exclude the closest channel to the systematic velocity.
 
         Returns
         -------
@@ -99,11 +95,6 @@ class Surface:
             print("Forcing star offset to: ", dRA, dDec, "(arcsec)")
             self.x_star = (cube.nx/2 +1) + (dRA*np.pi/(180 * 3600))/np.abs(cube.header['CDELT1']*np.pi/180)
             self.y_star = (cube.ny/2 +1) + (dDec*np.pi/(180 * 3600))/np.abs(cube.header['CDELT2']*np.pi/180)
-
-        if exclude_chans is None:
-            self.exclude_chans = np.array([np.abs(self.cube.velocity - self.v_syst).argmin()])
-        else:
-            self.exclude_chans = exclude_chans
 
         self._detect_surface()
         self._compute_surface()
@@ -422,11 +413,6 @@ class Surface:
                     if np.mean(j_surf[i,:]) - self.y_star_rot < 0:
                         print("pb 2 iv=", iv, "i=", i, "j=", j_surf[i,:])
                         # the average of the top surfaces cannot be below the star
-                        in_surface[i] = False
-
-                    #excluding surfaces as selected by the user, or as default the closest channel to the systematic velocity
-                    if iv in self.exclude_chans:
-                        print("pb 3")
                         in_surface[i] = False
 
                 #-- We find a spatial quadratic to refine position of maxima (like bettermoment does in velocity)
