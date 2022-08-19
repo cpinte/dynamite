@@ -298,6 +298,10 @@ class Surface:
         # Cross product with red shifted side
         self.is_inc_positive = (np.mean(x)-x_star)*(y[1]-y_star) - (np.mean(y)-y_star)*(x[1]-x_star) > 0.
         print("is inclination angle positive ?", self.is_inc_positive)
+        if self.is_inc_positive:
+            self.inc_sign = 1
+        else:
+            self.inc_sign = -1
 
         return
 
@@ -350,7 +354,7 @@ class Surface:
                 T_surf = np.zeros([nx,2])
                 I_surf = np.zeros([nx,2])
 
-                # Selecting range
+                # Selecting range of pixels to explore depending on velocity (ie 1 side of the disk only)
                 if (self.cube.velocity[iv] > self.v_syst):
                     i1=0
                     i2=int(np.floor(self.x_star_rot))
@@ -372,23 +376,24 @@ class Surface:
                         j_surf[i,:] = np.sort(j_max[:2])
 
                         # exclude maxima that do not make sense : only works if upper surface is at the top
-                        #if self.y_star_rot is not None:
-                        #   if (j_surf[i,1] < self.y_star_rot):
-                        #       # Houston, we have a pb : the back side of the disk cannot appear below the star
-                        #       j_max_sup = j_max[np.where(j_max > self.y_star_rot)]
-                        #       if j_max_sup.size:
-                        #           j_surf[i,1] = j_max_sup[0]
-                        #           j_surf[i,0] = j_max[0]
-                        #       else:
-                        #           in_surface[i] = False
-                        #
-                        #   if (np.mean(j_surf[i,:]) < self.y_star_rot):
-                        #       # the average of the top surfaces cannot be below the star
-                        #       in_surface[i] = False
-                        #
-                        #   #excluding surfaces as selected by the user, or as default the closest channel to the systematic velocity
-                        #   if iv in self.exclude_chans:
-                        #       in_surface[i] = False
+                        try_to_clean = False
+                        if try_to_clean:
+                           if ( self.inc_sign * (j_surf[i,1] - self.y_star_rot) < 0):
+                               # Houston, we have a pb : the back side of the disk cannot appear below the star
+                               j_max_sup = j_max[np.where(j_max > self.y_star_rot)]
+                               if j_max_sup.size:
+                                   j_surf[i,1] = j_max_sup[0]
+                                   j_surf[i,0] = j_max[0]
+                               else:
+                                   in_surface[i] = False
+
+                           if (self.inc_sign * (np.mean(j_surf[i,:]) - self.y_star_rot) < 0):
+                               # the average of the top surfaces cannot be below the star
+                               in_surface[i] = False
+
+                           #excluding surfaces as selected by the user, or as default the closest channel to the systematic velocity
+                           if iv in self.exclude_chans:
+                               in_surface[i] = False
 
                         #-- We find a spatial quadratic to refine position of maxima (like bettermoment does in velocity)
                         for k in range(2):
@@ -418,7 +423,6 @@ class Surface:
                 # this happens when the data gets noisy or diffuse and there are local maxima
                 # fit a line to average curve and remove points from front if above average
                 # and from back surface if  below average (most of these case should have been dealt with with test on star position)
-
                 # could search for other maxima but then it means that data is noisy anyway
                 #e.g. measure_surface(HD163, 45, plot=True, PA=-45,plot_cut=503,sigma=10, y_star=478)
                 if np.any(in_surface):
@@ -434,7 +438,7 @@ class Surface:
                         # plt.plot(x_plot, P[1] + P[0]*x_plot)
 
                         #in_surface_tmp = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) # test only front surface
-                        in_surface_tmp = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) & (j_surf_exact[:,1] > (P[1] + P[0]*x))
+                        in_surface_tmp = in_surface #&  (j_surf_exact[:,0] < (P[1] + P[0]*x)) & (j_surf_exact[:,1] > (P[1] + P[0]*x))
 
                         # We remove the weird point and reddo the fit again to ensure the slope we use is not too bad
                         x1 = x[in_surface_tmp]
@@ -442,7 +446,7 @@ class Surface:
                         P = np.polyfit(x1,y1,1)
 
                         #in_surface = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) # test only front surface
-                        in_surface = in_surface & (j_surf_exact[:,0] < (P[1] + P[0]*x)) & (j_surf_exact[:,1] > (P[1] + P[0]*x))
+                        in_surface = in_surface #& (j_surf_exact[:,0] < (P[1] + P[0]*x)) & (j_surf_exact[:,1] > (P[1] + P[0]*x))
 
                     # Saving the data
                     n = np.sum(in_surface)
@@ -458,13 +462,23 @@ class Surface:
                 bar()
             # end loop
 
-        #--  Additional spectral filtering to clean the data
+        #--  Additional spectral filtering to clean the data ??
+
+
         self.n_surf = n_surf
+        ou = np.where(n_surf>1)
+        self.iv_min_surf = np.min(ou)
+        self.iv_max_surf = np.max(ou)
+        print("Surfaces detected between channels", self.iv_min_surf, "and", self.iv_max_surf)
+
         self.x_sky = x_surf
         self.y_sky = y_surf
         self.Tb = Tb_surf
         self.I = Ib_surf
         self.snr = Ib_surf/std
+
+        return
+
 
 
     def _compute_surface(self):
@@ -535,6 +549,9 @@ class Surface:
         self.h = h
         self.v = v
         self.dv = dv
+
+        return
+
 
     def plot_surfaces(self,
         nbins: int = 30,
@@ -666,20 +683,6 @@ class Surface:
         ax[1].set_xlabel('Radius (")')
         ax[2].set_xlabel('Radius (")')
 
-       # ax[0].tick_params(axis='both', direction='out', labelbottom=True, labelleft=True, top=False, right=False, width=3, length=8 ,labelsize=font-10)
-        #ax[1].tick_params(axis='both', direction='out', labelbottom=True, labelleft=True, top=False, right=False, width=3, length=8 ,labelsize=font-10)
-        #ax[2].tick_params(axis='both', direction='out', labelbottom=True, labelleft=True, top=False, right=False, width=3, length=8 ,labelsize=font-10)
-
-
-        #Adding hard outline
-        #bar_size = 3
-        #c ="black"
-        #for i, axes in enumerate(ax):
-        #    ax[i].axhline(linewidth=bar_size, y=ax[i].get_ylim()[0], color=c)
-        #    ax[i].axvline(linewidth=bar_size, x=ax[i].get_xlim()[0], color=c)
-        #    ax[i].axhline(linewidth=bar_size, y=ax[i].get_ylim()[1], color=c)
-        #    ax[i].axvline(linewidth=bar_size, x=ax[i].get_xlim()[1], color=c)
-
         return
 
     def plot_channel(self, iv, win=20, radius=3.0, ax=None):
@@ -698,16 +701,13 @@ class Surface:
 
         pix_size = cube.header['CDELT2']*3600
 
-        ax.imshow(im, origin="lower", cmap='binary_r')#, interpolation="bilinear")
-        #ax.set_xlim(cube.nx/2 + radius/pix_size, cube.nx/2 - radius/pix_size)
-        #ax.set_ylim(cube.ny/2 - radius/pix_size, cube.ny/2 + radius/pix_size)
-        #ax.tick_params(axis='both', direction='out', labelbottom=False, labelleft=False, labeltop=False, labelright=False)
+        ax.imshow(im, origin="lower", cmap='binary_r')
         ax.set_title(r'$\Delta$v='+"{:.2f}".format(cube.velocity[iv])+' , id:'+str(iv), color='k')
 
         if n_surf[iv]:
             ax.plot(x[iv,:n_surf[iv]],y[iv,:n_surf[iv],0],"o",color="red",markersize=1)
             ax.plot(x[iv,:n_surf[iv]],y[iv,:n_surf[iv],1],"o",color="blue",markersize=1)
-            #plt.plot(x,np.mean(y,axis=1),"o",color="white",markersize=1)
+            ax.plot(x[iv,:n_surf[iv]],np.mean(y[iv,:n_surf[iv],:],axis=1),"o",color="white",markersize=1)
 
             # We zoom on the detected surfaces
             #ax.set_xlim(np.min(x[iv,:n_surf[iv]]) - 10*cube.bmaj/cube.pixelscale,np.max(x[iv,:n_surf[iv]]) + 10*cube.bmaj/cube.pixelscale)
@@ -715,13 +715,15 @@ class Surface:
 
         ax.plot(self.x_star_rot,self.y_star_rot,"o",color="magenta",ms=1)
 
-    def plot_channels(self,n=20, win=21, radius=1.0, iv_min=None, iv_max=None):
+        return
+
+    def plot_channels(self,n=20, num=21, radius=1.0, iv_min=None, iv_max=None):
 
         if iv_min is None:
-            iv_min=0
+            iv_min=self.iv_min_surf
 
         if iv_max is None:
-            iv_max = self.cube.nv
+            iv_max = self.iv_max_surf
 
         nv = iv_max-iv_min
         dv = nv/n
@@ -729,13 +731,18 @@ class Surface:
         ncols=5
         nrows = np.ceil(n / ncols).astype(int)
 
-        fig, axs = plt.subplots(ncols=5, nrows=nrows, figsize=(11, 2*nrows+1),constrained_layout=True,num=win)
+        if (plt.fignum_exists(num)):
+            plt.figure(num)
+            plt.clf()
+        fig, axs = plt.subplots(ncols=5, nrows=nrows, figsize=(11, 2*nrows+1),constrained_layout=True,num=num)
 
         for i, ax in enumerate(axs.flatten()):
             self.plot_channel(int(iv_min+i*dv), radius=radius, ax=ax)
 
+        return
+
     def fit_central_mass(self,
-        initial_guess: float = None,
+        initial_guess: float = 1.0,
         dist: float = None,
         h_func: ndarray = None,
         ):
@@ -774,7 +781,7 @@ class Surface:
 
         soln = minimize(self._ln_like, initial, bounds=((0, None),), args=(dist, h_func))
 
-        print("Maximum likelihood estimate:")
+        print("Fitting central mass, maximum likelihood estimate:")
         print(soln)
 
         return soln.x
