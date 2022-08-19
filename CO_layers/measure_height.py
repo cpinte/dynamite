@@ -17,16 +17,17 @@ from alive_progress import alive_bar
 class Surface:
 
     def __init__(self,
-        cube: None,
-        PA: float = None,
-        inc: float = None,
-        dRA: float = None,
-        dDec: float = None,
-        x_star: float = None,
-        y_star: float = None,
-        v_syst: float = None,
-        sigma: float = 10,
-        **kwargs):
+                 cube: None,
+                 PA: float = None,
+                 inc: float = None,
+                 dRA: float = None,
+                 dDec: float = None,
+                 x_star: float = None,
+                 y_star: float = None,
+                 v_syst: float = None,
+                 sigma: float = 10,
+                 dist: float = None,
+                 **kwargs):
         '''
         Parameters
         ----------
@@ -76,8 +77,6 @@ class Surface:
 
         self._initial_guess()
 
-        self.inc = inc
-
         if PA is not None:
             print("Forcing PA to:", PA)
             self.PA = PA
@@ -96,8 +95,55 @@ class Surface:
             self.x_star = (cube.nx/2 +1) + (dRA*np.pi/(180 * 3600))/np.abs(cube.header['CDELT1']*np.pi/180)
             self.y_star = (cube.ny/2 +1) + (dDec*np.pi/(180 * 3600))/np.abs(cube.header['CDELT2']*np.pi/180)
 
-        self._detect_surface()
+        self._extract_isovelocity()
+
+        if inc is not None:
+            print("Forcing inclination to ", inc, " deg")
+            self.inc = inc
+        else:
+            print("Estimating inclination:")
+            self.find_i()
+
         self._compute_surface()
+
+        if dist is not None:
+            self.dist = dist
+            self.fit_central_mass(dist=140)
+
+        return
+
+
+    def find_i(self):
+
+        plt.figure(4)
+        plt.clf()
+
+        # simple uniform gitd fit
+        inc_array = np.arange(10,80,1)
+        metric = np.zeros(len(inc_array))
+        for i, inc in enumerate(inc_array):
+            self.inc = inc
+            self._compute_surface()
+            self.compute_v_std()
+            metric[i] = self.v_std
+
+        plt.plot(inc_array,metric, color="red", markersize=1)
+
+        # We refine the fit
+        inc = inc_array[np.nanargmin(metric)]
+        inc_array = np.arange(inc-5,inc+5,0.25)
+        metric = np.zeros(len(inc_array))
+        for i, inc in enumerate(inc_array):
+            self.inc = inc
+            self._compute_surface()
+            self.compute_v_std()
+            metric[i] = self.v_std
+
+        plt.plot(inc_array,metric, color="blue", markersize=1)
+        plt.xlabel("Inclination ($^\mathrm{o}$)")
+        plt.ylabel("Metric")
+        self.inc = inc_array[np.nanargmin(metric)]
+        print("Best fit for inclination =", self.inc, "deg")
 
         return
 
@@ -302,7 +348,7 @@ class Surface:
         return
 
 
-    def _detect_surface(self):
+    def _extract_isovelocity(self):
         """
         Infer the upper emission surface from the provided cube
         extract the emission surface in each channel and loop over channels
@@ -336,9 +382,9 @@ class Surface:
 
 
         # Loop over the channels
-        with alive_bar(int(self.iv_max-self.iv_min), title="Extracting surfaces") as bar:
+        with alive_bar(int(self.iv_max-self.iv_min), title="Extracting isovelocity curves") as bar:
             for iv in range(self.iv_min,self.iv_max):
-                self._extract_surface_1channel(iv)
+                self._extract_isovelocity_1channel(iv)
                 bar()
             # end loop
 
@@ -356,7 +402,7 @@ class Surface:
         return
 
 
-    def _extract_surface_1channel(self,iv):
+    def _extract_isovelocity_1channel(self,iv):
 
         cube = self.cube
         nx = cube.nx
@@ -554,6 +600,20 @@ class Surface:
 
         return
 
+
+    def compute_v_std(self,nbins=30):
+
+        r = self.r.compressed()
+        #h = self.h.compressed()
+        v = self.v.compressed()
+
+        #h_std, _, _  = binned_statistic(r,h, 'std', bins=nbins)
+        v_std, _, _  = binned_statistic(r,v, 'std', bins=nbins)
+
+        #self.h_std = h_std
+        self.v_std = np.mean(v_std)
+
+        return
 
     def plot_surfaces(self,
         nbins: int = 30,
@@ -787,9 +847,11 @@ class Surface:
         soln = minimize(self._ln_like, initial, bounds=((0, None),), args=(dist, h_func))
 
         print("Fitting central mass, maximum likelihood estimate:")
-        print(soln)
+        self.m_star_sol = soln
+        self.m_star = soln.x[0]
+        print("Central mass = ", self.m_star, "Msun")
 
-        return soln.x
+        return
 
     def _ln_like(self, theta, dist, h_func = None):
         """Compute the ln like..
