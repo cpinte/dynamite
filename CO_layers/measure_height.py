@@ -26,7 +26,6 @@ class Surface:
         y_star: float = None,
         v_syst: float = None,
         sigma: float = 10,
-        exclude_chans: ndarray = None,
         **kwargs):
         '''
         Parameters
@@ -51,9 +50,6 @@ class Surface:
             mask channels within a certain km/s range of the systematic velocity
         sigma
             cutt off threshold to fit surface
-        exclude_chans
-            Excludes channels based on the channel ID chosen by the user. By default, if no channels
-            are selected the code will exclude the closest channel to the systematic velocity.
 
         Returns
         -------
@@ -99,11 +95,6 @@ class Surface:
             print("Forcing star offset to: ", dRA, dDec, "(arcsec)")
             self.x_star = (cube.nx/2 +1) + (dRA*np.pi/(180 * 3600))/np.abs(cube.header['CDELT1']*np.pi/180)
             self.y_star = (cube.ny/2 +1) + (dDec*np.pi/(180 * 3600))/np.abs(cube.header['CDELT2']*np.pi/180)
-
-        if exclude_chans is None:
-            self.exclude_chans = np.array([np.abs(self.cube.velocity - self.v_syst).argmin()])
-        else:
-            self.exclude_chans = exclude_chans
 
         self._detect_surface()
         self._compute_surface()
@@ -294,10 +285,15 @@ class Surface:
 
             ax.plot(np.mean(x),np.mean(y),"o",color="magenta",ms=4)
 
-        # Measure sign of inclination from average of 2 centroid
-        # Cross product with red shifted side
+        # Measure sign of inclination from average of 2 centroid, using a cross product with red shifted side
+        # positive inclination means that the near side of the upper surface is at the bottom of the map when the red-shifted side is to the right
         self.is_inc_positive = (np.mean(x)-x_star)*(y[1]-y_star) - (np.mean(y)-y_star)*(x[1]-x_star) > 0.
-        print("is inclination angle positive ?", self.is_inc_positive)
+
+        if self.is_inc_positive:
+            print("inclination angle is positive")
+        else:
+            print("inclination angle is negative")
+
         if self.is_inc_positive:
             self.inc_sign = 1
         else:
@@ -321,18 +317,17 @@ class Surface:
 
         cube = self.cube
         nx, nv = cube.nx, cube.nv
-        std = self.std
 
-        n_surf = np.zeros(nv, dtype=int)
-        x_surf = np.zeros([nv,nx])
-        y_surf = np.zeros([nv,nx,2])
-        Tb_surf = np.zeros([nv,nx,2])
-        Ib_surf = np.zeros([nv,nx,2])
+        self.n_surf = np.zeros(nv, dtype=int)
+        self.x_sky = np.zeros([nv,nx])
+        self.y_sky = np.zeros([nv,nx,2])
+        self.Tb = np.zeros([nv,nx,2])
+        self.I = np.zeros([nv,nx,2])
 
         surface_color = ["red","blue"]
 
         # Rotate star position
-        angle = np.deg2rad(self.PA - 90.0)
+        angle = np.deg2rad(self.PA - self.inc_sign * 90.0)
         center = (np.array(cube.image.shape[1:3])-1)/2.
         dx = self.x_star-center[0]
         dy = self.y_star-center[1]
@@ -343,143 +338,150 @@ class Surface:
         # Loop over the channels
         with alive_bar(int(self.iv_max-self.iv_min), title="Extracting surfaces") as bar:
             for iv in range(self.iv_min,self.iv_max):
-                #print(iv,"/",nv-1)
-                # Rotate the image so major axis is aligned with x-axis.
-                im = np.array(rotate(cube.image[iv,:,:], self.PA - 90.0, reshape=False))
-
-                # Setting up arrays in each channel map
-                in_surface = np.full(nx,False)
-                j_surf = np.zeros([nx,2], dtype=int)
-                j_surf_exact = np.zeros([nx,2])
-                T_surf = np.zeros([nx,2])
-                I_surf = np.zeros([nx,2])
-
-                # Selecting range of pixels to explore depending on velocity (ie 1 side of the disk only)
-                if (self.cube.velocity[iv] > self.v_syst):
-                    i1=0
-                    i2=int(np.floor(self.x_star_rot))
-                else:
-                    i1=int(np.floor(self.x_star_rot))+1
-                    i2=nx
-
-                # Loop over the pixels along the x-axis to find surface
-                for i in range(i1,i2):
-                    vert_profile = im[:,i]
-                    # find the maxima in each vertical cut, at signal above X sigma
-                    # ignore maxima not separated by at least a beam
-                    j_max = search_maxima(vert_profile, height=self.sigma*std, dx=cube.bmaj/cube.pixelscale, prominence=2*std)
-
-                    if (j_max.size>1): # We need at least 2 maxima to locate the surface
-                        in_surface[i] = True
-
-                        # indices of the back and front side
-                        j_surf[i,:] = np.sort(j_max[:2])
-
-                        # exclude maxima that do not make sense : only works if upper surface is at the top
-                        try_to_clean = False
-                        if try_to_clean:
-                           if ( self.inc_sign * (j_surf[i,1] - self.y_star_rot) < 0):
-                               # Houston, we have a pb : the back side of the disk cannot appear below the star
-                               j_max_sup = j_max[np.where(j_max > self.y_star_rot)]
-                               if j_max_sup.size:
-                                   j_surf[i,1] = j_max_sup[0]
-                                   j_surf[i,0] = j_max[0]
-                               else:
-                                   in_surface[i] = False
-
-                           if (self.inc_sign * (np.mean(j_surf[i,:]) - self.y_star_rot) < 0):
-                               # the average of the top surfaces cannot be below the star
-                               in_surface[i] = False
-
-                           #excluding surfaces as selected by the user, or as default the closest channel to the systematic velocity
-                           if iv in self.exclude_chans:
-                               in_surface[i] = False
-
-                        #-- We find a spatial quadratic to refine position of maxima (like bettermoment does in velocity)
-                        for k in range(2):
-                            j = j_surf[i,k]
-
-                            f_max = im[j,i]
-                            f_minus = im[j-1,i]
-                            f_plus = im[j+1,i]
-
-                            # Work out the polynomial coefficients
-                            a0 = 13. * f_max / 12. - (f_plus + f_minus) / 24.
-                            a1 = 0.5 * (f_plus - f_minus)
-                            a2 = 0.5 * (f_plus + f_minus - 2*f_max)
-
-                            # Compute the maximum of the quadratic
-                            y_max = j - 0.5 * a1 / a2
-                            f_max = a0 - 0.25 * a1**2 / a2
-
-                            # Saving the coordinates
-                            j_surf_exact[i,k] = y_max
-                            T_surf[i,k] = cube._Jybeam_to_Tb(f_max) # Converting to Tb (currently assuming the cube is in Jy/beam)
-                            I_surf[i,k] = f_max
-
-                #-- Now we try to clean out a bit the surfaces we have extracted
-
-                #-- We test if front side is too high or the back side too low
-                # this happens when the data gets noisy or diffuse and there are local maxima
-                # fit a line to average curve and remove points from front if above average
-                # and from back surface if  below average (most of these case should have been dealt with with test on star position)
-                # could search for other maxima but then it means that data is noisy anyway
-                #e.g. measure_surface(HD163, 45, plot=True, PA=-45,plot_cut=503,sigma=10, y_star=478)
-                if np.any(in_surface):
-                    x = np.arange(nx)
-                    x1 = x[in_surface]
-
-                    y1 = np.mean(j_surf_exact[in_surface,:],axis=1)
-
-                    if (len(x1) > 2):
-                        P = np.polyfit(x1,y1,1)
-
-                        # x_plot = np.array([0,nx])
-                        # plt.plot(x_plot, P[1] + P[0]*x_plot)
-
-                        #in_surface_tmp = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) # test only front surface
-                        in_surface_tmp = in_surface #&  (j_surf_exact[:,0] < (P[1] + P[0]*x)) & (j_surf_exact[:,1] > (P[1] + P[0]*x))
-
-                        # We remove the weird point and reddo the fit again to ensure the slope we use is not too bad
-                        x1 = x[in_surface_tmp]
-                        y1 = np.mean(j_surf_exact[in_surface_tmp,:],axis=1)
-                        P = np.polyfit(x1,y1,1)
-
-                        #in_surface = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) # test only front surface
-                        in_surface = in_surface #& (j_surf_exact[:,0] < (P[1] + P[0]*x)) & (j_surf_exact[:,1] > (P[1] + P[0]*x))
-
-                    # Saving the data
-                    n = np.sum(in_surface)
-                    n_surf[iv] = n # number of points in that surface
-                    if n:
-                        x_surf[iv,:n] = x[in_surface]
-                        y_surf[iv,:n,:] = j_surf_exact[in_surface,:]
-                        Tb_surf[iv,:n,:] = T_surf[in_surface,:]
-                        Ib_surf[iv,:n,:] = I_surf[in_surface,:]
-
-                    #-- test if we have points on both side of the star
-                    # - remove side with the less points
+                self._extract_surface_1channel(iv)
                 bar()
             # end loop
 
         #--  Additional spectral filtering to clean the data ??
 
 
-        self.n_surf = n_surf
-        ou = np.where(n_surf>1)
+
+        ou = np.where(self.n_surf>1)
         self.iv_min_surf = np.min(ou)
         self.iv_max_surf = np.max(ou)
         print("Surfaces detected between channels", self.iv_min_surf, "and", self.iv_max_surf)
 
-        self.x_sky = x_surf
-        self.y_sky = y_surf
-        self.Tb = Tb_surf
-        self.I = Ib_surf
-        self.snr = Ib_surf/std
+        self.snr = self.I/self.std
 
         return
 
 
+    def _extract_surface_1channel(self,iv):
+
+        cube = self.cube
+        nx = cube.nx
+
+        # Rotate the image so major axis is aligned with x-axis, and the far side is at the top
+        im = np.array(rotate(cube.image[iv,:,:], self.PA - self.inc_sign * 90.0, reshape=False))
+
+        # Setting up arrays in each channel map
+        in_surface = np.full(nx,False)
+        j_surf = np.zeros([nx,2], dtype=int)
+        j_surf_exact = np.zeros([nx,2])
+        T_surf = np.zeros([nx,2])
+        I_surf = np.zeros([nx,2])
+
+        # Selecting range of pixels to explore depending on velocity (ie 1 side of the disk only)
+        if (self.cube.velocity[iv] - self.v_syst) * self.inc_sign > 0:
+            i1=0
+            i2=int(np.floor(self.x_star_rot))
+        else:
+            i1=int(np.floor(self.x_star_rot))+1
+            i2=nx
+
+        # Loop over the pixels along the x-axis to find surface
+        #print("i12", i1, i2)
+        for i in range(i1,i2):
+            vert_profile = im[:,i]
+            # find the maxima in each vertical cut, at signal above X sigma
+            # ignore maxima not separated by at least a beam
+            j_max = search_maxima(vert_profile, height=self.sigma*self.std, dx=cube.bmaj/cube.pixelscale, prominence=2*self.std)
+
+            if (j_max.size>1): # We need at least 2 maxima to locate the surface
+                in_surface[i] = True
+
+                # indices of the near [0] and far [1] sides of upper surface
+                j_surf[i,:] = np.sort(j_max[:2])
+
+
+                #print("------------------------------")
+                #print(i, "j_surf", j_surf[i,:])
+
+                try_to_clean = False
+                # exclude maxima that do not make sense : only works if upper surface is at the top
+                if try_to_clean:
+                    if j_surf[i,1] - self.y_star_rot < 0:
+                        #print("pb 1 iv=", iv, "i=", i, "j=", j_surf[i,1])
+                        # Houston, we have a pb : the far side of the disk cannot appear below the star
+                        j_max_sup = j_max[np.where(j_max > self.y_star_rot)]
+                        if j_max_sup.size:
+                            j_surf[i,1] = j_max_sup[0]
+                            j_surf[i,0] = j_max[0]
+                        else:
+                            in_surface[i] = False
+
+                    if np.mean(j_surf[i,:]) - self.y_star_rot < 0:
+                        #print("pb 2 iv=", iv, "i=", i, "j=", j_surf[i,:])
+                        # the average of the top surfaces cannot be below the star
+                        in_surface[i] = False
+
+                #-- We find a spatial quadratic to refine position of maxima (like bettermoment does in velocity)
+                for k in range(2):
+                    j = j_surf[i,k]
+
+                    f_max = im[j,i]
+                    f_minus = im[j-1,i]
+                    f_plus = im[j+1,i]
+
+                    # Work out the polynomial coefficients
+                    a0 = 13. * f_max / 12. - (f_plus + f_minus) / 24.
+                    a1 = 0.5 * (f_plus - f_minus)
+                    a2 = 0.5 * (f_plus + f_minus - 2*f_max)
+
+                    # Compute the maximum of the quadratic
+                    y_max = j - 0.5 * a1 / a2
+                    f_max = a0 - 0.25 * a1**2 / a2
+
+                    # Saving the coordinates
+                    j_surf_exact[i,k] = y_max
+                    T_surf[i,k] = cube._Jybeam_to_Tb(f_max) # Converting to Tb (currently assuming the cube is in Jy/beam)
+                    I_surf[i,k] = f_max
+
+        #-- Now we try to clean out a bit the surfaces we have extracted
+
+        #-- We test if front side is too high or the back side too low
+        # this happens when the data gets noisy or diffuse and there are local maxima
+        # fit a line to average curve and remove points from front if above average
+        # and from back surface if  below average (most of these case should have been dealt with with test on star position)
+        # could search for other maxima but then it means that data is noisy anyway
+        #e.g. measure_surface(HD163, 45, plot=True, PA=-45,plot_cut=503,sigma=10, y_star=478)
+        if np.any(in_surface):
+            x = np.arange(nx)
+            x1 = x[in_surface]
+
+            y1 = np.mean(j_surf_exact[in_surface,:],axis=1)
+
+            if (len(x1) > 2):
+                P = np.polyfit(x1,y1,1)
+
+                # x_plot = np.array([0,nx])
+                # plt.plot(x_plot, P[1] + P[0]*x_plot)
+
+                #in_surface_tmp = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) # test only front surface
+                in_surface_tmp = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) & (j_surf_exact[:,1] > (P[1] + P[0]*x))
+
+                # We remove the weird point and reddo the fit again to ensure the slope we use is not too bad
+                x1 = x[in_surface_tmp]
+                y1 = np.mean(j_surf_exact[in_surface_tmp,:],axis=1)
+                P = np.polyfit(x1,y1,1)
+
+                #in_surface = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) # test only front surface
+                in_surface = in_surface & (j_surf_exact[:,0] < (P[1] + P[0]*x)) & (j_surf_exact[:,1] > (P[1] + P[0]*x))
+
+            #-- test if we have points on both side of the star
+            # - remove side with the less points
+
+
+        # Saving the data
+        n = np.sum(in_surface) # number of points in that surface
+        self.n_surf[iv] = n
+        if n:
+            self.x_sky[iv,:n] = x[in_surface]
+            self.y_sky[iv,:n,:] = j_surf_exact[in_surface,:]
+            self.Tb[iv,:n,:] = T_surf[in_surface,:]
+            self.I[iv,:n,:] = I_surf[in_surface,:]
+
+        return
 
     def _compute_surface(self):
         """
@@ -512,8 +514,8 @@ class Surface:
         h = y_c / np.sin(inc_rad)
 
         # -- If the disc is oriented the other way
-        if not self.is_inc_positive :
-            h = -h
+        #if not self.is_inc_positive :
+        #    h = -h
 
         v = (self.cube.velocity[:,np.newaxis] - self.v_syst) * r / (x * np.sin(inc_rad)) # does not depend on y_star
 
@@ -685,10 +687,13 @@ class Surface:
 
         return
 
-    def plot_channel(self, iv, win=20, radius=3.0, ax=None):
+    def plot_channel(self, iv, win=20, radius=3.0, ax=None, clear=True):
 
         if ax is None:
             ax = plt.gca()
+
+        if clear:
+            ax.cla()
 
         cube = self.cube
         x = self.x_sky
@@ -697,7 +702,7 @@ class Surface:
 
         im = np.nan_to_num(cube.image[iv,:,:])
         if self.PA is not None:
-            im = np.array(rotate(im, self.PA - 90.0, reshape=False))
+            im = np.array(rotate(im, self.PA - self.inc_sign * 90.0, reshape=False))
 
         pix_size = cube.header['CDELT2']*3600
 
@@ -734,7 +739,7 @@ class Surface:
         if (plt.fignum_exists(num)):
             plt.figure(num)
             plt.clf()
-        fig, axs = plt.subplots(ncols=5, nrows=nrows, figsize=(11, 2*nrows+1),constrained_layout=True,num=num)
+        fig, axs = plt.subplots(ncols=5, nrows=nrows, figsize=(11, 2*nrows+1),constrained_layout=True,num=num, clear=False)
 
         for i, ax in enumerate(axs.flatten()):
             self.plot_channel(int(iv_min+i*dv), radius=radius, ax=ax)

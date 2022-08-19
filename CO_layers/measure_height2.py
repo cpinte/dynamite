@@ -15,7 +15,6 @@ from astropy.io import fits
 
 import matplotlib.pyplot as plt
 import matplotlib.cm as cm
-import cmocean as cmo
 import cmasher as cmr
 import matplotlib.gridspec as gridspec
 from matplotlib.patches import Ellipse
@@ -43,9 +42,9 @@ class Surface:
         print('rms =', rms)
 
         self._detect_surface()
-        self._plot_traced_channels()
+        #self._plot_traced_channels()
         self._compute_surface()
-        self._plot_mol_surface()
+        #self._plot_mol_surface()
 
         return
 
