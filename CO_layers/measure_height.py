@@ -391,9 +391,9 @@ class Surface:
         # Selecting range of pixels to explore depending on velocity (ie 1 side of the disk only)
         if (self.cube.velocity[iv] - self.v_syst) * self.inc_sign > 0:
             i1=0
-            i2=int(np.floor(self.x_star_rot))
+            i2=int(np.floor(self.x_star_rot))-1
         else:
-            i1=int(np.floor(self.x_star_rot))+1
+            i1=int(np.floor(self.x_star_rot))+2
             i2=nx
 
         # Loop over the pixels along the x-axis to find surface
