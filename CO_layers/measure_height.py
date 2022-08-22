@@ -27,6 +27,8 @@ class Surface:
                  v_syst: float = None,
                  sigma: float = 10,
                  dist: float = None,
+                 num: int = 0,
+                 plot: bool = True,
                  **kwargs):
         '''
         Parameters
@@ -75,7 +77,7 @@ class Surface:
 
         self.sigma = sigma
 
-        self._initial_guess()
+        self._initial_guess(num=num)
 
         if PA is not None:
             print("Forcing PA to:", PA)
@@ -97,63 +99,31 @@ class Surface:
 
         self._extract_isovelocity()
 
+        self.plot_channels(num=num+5)
+
         if inc is not None:
             print("Forcing inclination to ", inc, " deg")
             self.inc = inc
         else:
             print("Estimating inclination:")
-            self.find_i()
+            self.find_i(num)
 
         self._compute_surface()
 
         if dist is not None:
             self.dist = dist
-            self.fit_central_mass(dist=140)
+            self.fit_central_mass(dist=dist)
+            self.plot_surfaces(m_star=self.m_star,dist=dist)
+        else:
+            self.plot_surfaces()
 
         return
 
 
-    def find_i(self):
-
-        plt.figure(4)
-        plt.clf()
-
-        # simple uniform gitd fit
-        inc_array = np.arange(10,80,1)
-        metric = np.zeros(len(inc_array))
-        for i, inc in enumerate(inc_array):
-            self.inc = inc
-            self._compute_surface()
-            self.compute_v_std()
-            metric[i] = self.v_std
-
-        plt.plot(inc_array,metric, color="red", markersize=1)
-
-        # We refine the fit
-        inc = inc_array[np.nanargmin(metric)]
-        inc_array = np.arange(inc-5,inc+5,0.25)
-        metric = np.zeros(len(inc_array))
-        for i, inc in enumerate(inc_array):
-            self.inc = inc
-            self._compute_surface()
-            self.compute_v_std()
-            metric[i] = self.v_std
-
-        plt.plot(inc_array,metric, color="blue", markersize=1)
-        plt.xlabel("Inclination ($^\mathrm{o}$)")
-        plt.ylabel("Metric")
-        self.inc = inc_array[np.nanargmin(metric)]
-        print("Best fit for inclination =", self.inc, "deg")
-
-        return
-
-
-    def _initial_guess(self):
+    def _initial_guess(self,num=0):
         """
 
         """
-
-        print("Starting initial guess")
 
         #----------------------------
         # 1. Noise properties
@@ -203,7 +173,7 @@ class Surface:
 
         iv_peaks = search_maxima(profile, height=10*profile_rms, dx=dx, prominence=0.2*np.max(profile))
 
-        plt.figure(1)
+        plt.figure(num+1)
         plt.clf()
         self.cube.plot_line(threshold=3*std)
 
@@ -237,6 +207,9 @@ class Surface:
             x2=np.linspace(np.min(x),np.max(x),100)
             plt.plot(x2,Gaussian_p_cst(x2,p[0],p[1],p[2],p[3]), color="C3", linestyle="--", lw=1)
 
+        plt.xlabel("Velocity (km/s$)")
+        plt.ylabel("Flux density (Jy/beam)")
+
         self.v_peaks = v_peaks
         self.delta_v_peaks = v_peaks[1] - v_peaks[0]
 
@@ -247,6 +220,8 @@ class Surface:
 
         plt.plot([self.v_syst,self.v_syst], [0.,1.05*np.max(profile)], lw=1, color="black", alpha=0.5)
 
+        self.excluded_delta_v = np.maximum(0.25 * self.delta_v_peaks, 0.1)
+        print("Excluding channels within ", self.excluded_delta_v, "km/s of systemic velocity" )
 
         #---------------------------------
         # 3. Estimated stellar position
@@ -266,7 +241,7 @@ class Surface:
         iv1 = int(iv_syst-dv)
         iv2 = int(iv_syst+dv)
 
-        plt.figure(1)
+        plt.figure(num+1)
         plt.plot(self.cube.velocity[[iv1,iv2]], profile[[iv1,iv2]], "o")
         plt.xlim(self.cube.velocity[iv1]-0.5,self.cube.velocity[iv2]+0.5)
 
@@ -287,11 +262,10 @@ class Surface:
         print("Estimated position of star:", x_star, y_star, "(pixels)")
 
         color=["C0","C3"] # ie blue and red
-        num=2
-        if (plt.fignum_exists(num)):
-            plt.figure(num)
+        if (plt.fignum_exists(num+2)):
+            plt.figure(num+2)
             plt.clf()
-        fig2, axes2 = plt.subplots(nrows=1,ncols=2,num=num,figsize=(12,5),sharex=True,sharey=True)
+        fig2, axes2 = plt.subplots(nrows=1,ncols=2,num=num+2,figsize=(12,5),sharex=True,sharey=True)
         for i in range(2):
             ax = axes2[i]
             self.cube.plot(iv=[iv1,iv2][i],ax=ax,axes_unit="pixel")
@@ -316,11 +290,10 @@ class Surface:
         self.PA = PA
         print("Estimated PA of red shifted side =", PA, "deg")
 
-        num=3
-        if (plt.fignum_exists(num)):
-            plt.figure(num)
+        if (plt.fignum_exists(num+3)):
+            plt.figure(num+3)
             plt.clf()
-        fig3, axes3 = plt.subplots(nrows=1,ncols=2,num=num,figsize=(12,5),sharex=True,sharey=True)
+        fig3, axes3 = plt.subplots(nrows=1,ncols=2,num=num+3,figsize=(12,5),sharex=True,sharey=True)
         for i in range(2):
             ax = axes3[i]
             self.cube.plot(iv=iv_peaks[i],ax=ax,axes_unit="pixel")
@@ -329,16 +302,14 @@ class Surface:
 
             ax.plot(self.x_star,self.y_star,"*",color="white",ms=3)
 
-            ax.plot(np.mean(x),np.mean(y),"o",color="magenta",ms=4)
-
         # Measure sign of inclination from average of 2 centroid, using a cross product with red shifted side
-        # positive inclination means that the near side of the upper surface is at the bottom of the map when the red-shifted side is to the right
+        # positive inclination means that the near side of the upper surface is at the bottom of the map when the blue-shifted side is to the right
         self.is_inc_positive = (np.mean(x)-x_star)*(y[1]-y_star) - (np.mean(y)-y_star)*(x[1]-x_star) > 0.
 
         if self.is_inc_positive:
-            print("inclination angle is positive")
+            print("Inclination angle is positive")
         else:
-            print("inclination angle is negative")
+            print("Inclination angle is negative")
 
         if self.is_inc_positive:
             self.inc_sign = 1
@@ -578,7 +549,7 @@ class Surface:
         mask = mask | (h<0) | np.isinf(v) | np.isnan(v)
 
         # -- we remove channels that are too close to the systemic velocity
-        mask = mask | (np.abs(self.cube.velocity - self.v_syst) < 0.25*self.delta_v_peaks)[:,np.newaxis]
+        mask = mask | (np.abs(self.cube.velocity - self.v_syst) < self.excluded_delta_v)[:,np.newaxis]
 
         r = np.ma.masked_array(r,mask)
         h = np.ma.masked_array(h,mask)
@@ -587,7 +558,6 @@ class Surface:
 
         # -- If the disc rotates in the opposite direction as expected
         if (np.mean(v) < 0):
-            print("Negative velocities !!")
             v = -v
 
         # -- Todo : optimize position, inclination (is that posible without a model ?), PA (need to re-run detect surface)
@@ -614,6 +584,42 @@ class Surface:
         self.v_std = np.mean(v_std)
 
         return
+
+
+    def find_i(self,num=0):
+
+        plt.figure(num+4)
+        plt.clf()
+
+        # simple uniform gitd fit
+        inc_array = np.arange(10,80,1)
+        metric = np.zeros(len(inc_array))
+        for i, inc in enumerate(inc_array):
+            self.inc = inc
+            self._compute_surface()
+            self.compute_v_std()
+            metric[i] = self.v_std
+
+        plt.plot(inc_array,metric, color="red", markersize=1)
+
+        # We refine the fit
+        inc = inc_array[np.nanargmin(metric)]
+        inc_array = np.arange(inc-5,inc+5,0.25)
+        metric = np.zeros(len(inc_array))
+        for i, inc in enumerate(inc_array):
+            self.inc = inc
+            self._compute_surface()
+            self.compute_v_std()
+            metric[i] = self.v_std
+
+        plt.plot(inc_array,metric, color="blue", markersize=1)
+        plt.xlabel("Inclination ($^\mathrm{o}$)")
+        plt.ylabel("Metric")
+        self.inc = inc_array[np.nanargmin(metric)]
+        print("Best fit for inclination =", self.inc, "deg")
+
+        return
+
 
     def plot_surfaces(self,
         nbins: int = 30,
@@ -716,7 +722,7 @@ class Surface:
             if (dist is None):
                 raise ValueError("dist must be provided")
             v_model = self._keplerian_disc(m_star, dist)
-            ax[1].scatter(r_data, v_model,alpha=0.5,s=3,color="blue",marker='o', label = 'Kep model')
+            ax[1].scatter(r_data, v_model,alpha=0.5,s=3,color="grey",marker='o', label = 'Kep model')
 
         if m_star_h_func:
             if (dist is None):
