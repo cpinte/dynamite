@@ -29,6 +29,7 @@ class Surface:
                  dist: float = None,
                  num: int = 0,
                  plot: bool = True,
+                 std : float = None,
                  **kwargs):
         '''
         Parameters
@@ -77,7 +78,7 @@ class Surface:
 
         self.sigma = sigma
 
-        self._initial_guess(num=num)
+        self._initial_guess(num=num,std=std)
 
         if PA is not None:
             print("Forcing PA to:", PA)
@@ -120,7 +121,7 @@ class Surface:
         return
 
 
-    def _initial_guess(self,num=0):
+    def _initial_guess(self,num=0,std=None):
         """
 
         """
@@ -130,7 +131,8 @@ class Surface:
         #----------------------------
 
         # Measure the standard deviation in 1st and last channels
-        std = np.nanstd(self.cube.image[[1,-1],:,:])
+        if std is None:
+            std = np.nanstd(self.cube.image[[1,-1],:,:])
         self.std = std
 
         print("Estimated std per channel is : ", std, self.cube.unit)
