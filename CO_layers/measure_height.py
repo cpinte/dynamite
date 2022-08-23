@@ -100,7 +100,7 @@ class Surface:
 
         self._extract_isovelocity()
 
-        self.plot_channels(num=num+5)
+        self.plot_channels(num=num+8)
 
         if inc is not None:
             print("Forcing inclination to ", inc, " deg")
@@ -114,9 +114,9 @@ class Surface:
         if dist is not None:
             self.dist = dist
             self.fit_central_mass(dist=dist)
-            self.plot_surfaces(m_star=self.m_star,dist=dist)
+            self.plot_surfaces(num=num+9,m_star=self.m_star,dist=dist)
         else:
-            self.plot_surfaces()
+            self.plot_surfaces(num=num+9)
 
         return
 
@@ -377,6 +377,11 @@ class Surface:
 
     def _extract_isovelocity_1channel(self,iv):
 
+
+        if np.abs(self.cube.velocity[iv] - self.v_syst) < self.excluded_delta_v:
+            self.n_surf[iv] = 0
+            return
+
         cube = self.cube
         nx = cube.nx
 
@@ -576,20 +581,67 @@ class Surface:
     def compute_v_std(self,nbins=30):
 
         r = self.r.compressed()
-        #h = self.h.compressed()
+        h = self.h.compressed()
         v = self.v.compressed()
+        T = np.mean(self.Tb[:,:,:],axis=2).ravel()[np.invert(self.r.mask.ravel())]
 
-        #h_std, _, _  = binned_statistic(r,h, 'std', bins=nbins)
+
+        h_std, _, _  = binned_statistic(r,h, 'std', bins=nbins)
         v_std, _, _  = binned_statistic(r,v, 'std', bins=nbins)
+        T_std, _, _  = binned_statistic(r,T, 'std', bins=nbins)
 
-        #self.h_std = h_std
+
+
+        self.h_std = np.mean(h_std)
         self.v_std = np.mean(v_std)
+        self.T_std = np.mean(T_std)
+
+        self.v_std = self.v_std
+
+        #self.v_std = np.mean(v_std) * np.mean(h_std) * np.mean(T_std)
 
         return
 
 
     def find_i(self,num=0):
 
+
+        # Altitude dispersion
+        plt.figure(num+5)
+        plt.clf()
+
+        # simple uniform gitd fit
+        inc_array = np.arange(10,80,1)
+        metric = np.zeros(len(inc_array))
+        for i, inc in enumerate(inc_array):
+            self.inc = inc
+            self._compute_surface()
+            self.compute_v_std()
+            metric[i] = self.h_std
+
+        plt.plot(inc_array,metric, color="red", markersize=1)
+        plt.xlabel("Inclination ($^\mathrm{o}$)")
+        plt.ylabel("altitude dispersion")
+
+        # T dispersion
+        plt.figure(num+6)
+        plt.clf()
+
+        # simple uniform gitd fit
+        inc_array = np.arange(10,80,1)
+        metric = np.zeros(len(inc_array))
+        for i, inc in enumerate(inc_array):
+            self.inc = inc
+            self._compute_surface()
+            self.compute_v_std()
+            metric[i] = self.T_std
+
+        plt.plot(inc_array,metric, color="red", markersize=1)
+        plt.xlabel("Inclination ($^\mathrm{o}$)")
+        plt.ylabel("T dispersion")
+
+
+        # Velocity dispersion
         plt.figure(num+4)
         plt.clf()
 
@@ -616,7 +668,7 @@ class Surface:
 
         plt.plot(inc_array,metric, color="blue", markersize=1)
         plt.xlabel("Inclination ($^\mathrm{o}$)")
-        plt.ylabel("Metric")
+        plt.ylabel("Velocity dispersion")
         self.inc = inc_array[np.nanargmin(metric)]
         print("Best fit for inclination =", self.inc, "deg")
 
@@ -624,15 +676,16 @@ class Surface:
 
 
     def plot_surfaces(self,
-        nbins: int = 30,
-        m_star: float = None,
-        m_star_h_func: float = None,
-        h_func: ndarray = None,
-        dist: float = None,
-        plot_power_law: bool = False,
-        plot_tapered_power_law: bool = False,
-        r0: float = 1.0,
-        ):
+                      nbins: int = 30,
+                      m_star: float = None,
+                      m_star_h_func: float = None,
+                      h_func: ndarray = None,
+                      dist: float = None,
+                      plot_power_law: bool = False,
+                      plot_tapered_power_law: bool = False,
+                      r0: float = 1.0,
+                      num=None
+                      ):
         '''
         Parameters
         ----------
@@ -677,7 +730,11 @@ class Surface:
         v_data = v.ravel().compressed()#[np.invert(mask.ravel())]
         T_data = np.mean(self.Tb[:,:,:],axis=2).ravel()[np.invert(r.mask.ravel())]
 
-        fig = plt.figure(figsize=(15,5))
+
+        if (plt.fignum_exists(num)):
+            plt.figure(num)
+            plt.clf()
+        fig = plt.figure(num,figsize=(15,5))
         gs = fig.add_gridspec(nrows=1,ncols=3)
         gs.update(wspace=0.2, hspace=0.05)
         ax=[]
@@ -738,7 +795,8 @@ class Surface:
             ax[1].plot(x, v_mod,alpha=0.75, ls='--',color="purple", label = 'Kep model w h_func')
 
         #Temperature
-        ax[2].scatter(r.ravel(),T.ravel(),alpha=0.5,s=3,c=dv.ravel(),marker='o',cmap="jet")
+        sc = ax[2].scatter(r.ravel(),T.ravel(),alpha=0.5,s=3,c=dv.ravel(),marker='o',cmap="jet")
+        colorbar2(sc)
 
         bins, _, _ = binned_statistic(r_data,[r_data,T_data], bins=nbins)
         std, _, _  = binned_statistic(r_data,T_data, 'std', bins=nbins)
@@ -755,7 +813,7 @@ class Surface:
 
         return
 
-    def plot_channel(self, iv, win=20, radius=3.0, ax=None, clear=True):
+    def plot_channel(self, iv, radius=3.0, ax=None, clear=True):
 
         if ax is None:
             ax = plt.gca()
@@ -775,7 +833,7 @@ class Surface:
         pix_size = cube.header['CDELT2']*3600
 
         ax.imshow(im, origin="lower", cmap='binary_r')
-        ax.set_title(r'$\Delta$v='+"{:.2f}".format(cube.velocity[iv])+' , id:'+str(iv), color='k')
+        ax.set_title(r'$\Delta$v='+"{:.2f}".format(cube.velocity[iv] - self.v_syst)+' , id:'+str(iv), color='k')
 
         if n_surf[iv]:
             ax.plot(x[iv,:n_surf[iv]],y[iv,:n_surf[iv],0],"o",color="red",markersize=1)
@@ -1012,3 +1070,37 @@ def search_maxima(y, height=None, dx=0, prominence=0):
 def Gaussian_p_cst(x, C, A, x0, sigma):
     """" Gaussian + constant function """
     return C + A * np.exp(-(x - x0) ** 2 / (2 * sigma ** 2))
+
+
+def colorbar2(mappable, shift=None, width=0.05, ax=None, trim_left=0, trim_right=0, side="right",**kwargs):
+    # creates a color bar that does not shrink the main plot or panel
+    # only works for horizontal bars so far
+
+    if ax is None:
+        ax = mappable.axes
+
+    # Get current figure dimensions
+    try:
+        fig = ax.figure
+        p = np.zeros([1,4])
+        p[0,:] = ax.get_position().get_points().flatten()
+    except:
+        fig = ax[0].figure
+        p = np.zeros([ax.size,4])
+        for k, a in enumerate(ax):
+            p[k,:] = a.get_position().get_points().flatten()
+    xmin = np.amin(p[:,0]) ; xmax = np.amax(p[:,2]) ; dx = xmax - xmin
+    ymin = np.amin(p[:,1]) ; ymax = np.amax(p[:,3]) ; dy = ymax - ymin
+
+    if side=="top":
+        if shift is None:
+            shift = 0.2
+        cax = fig.add_axes([xmin + trim_left, ymax + shift * dy, dx - trim_left - trim_right, width * dy])
+        cax.xaxis.set_ticks_position('top')
+        return fig.colorbar(mappable, cax=cax, orientation="horizontal",**kwargs)
+    elif side=="right":
+        if shift is None:
+            shift = 0.05
+        cax = fig.add_axes([xmax + shift*dx, ymin, width * dx, dy])
+        cax.xaxis.set_ticks_position('top')
+        return fig.colorbar(mappable, cax=cax, orientation="vertical",**kwargs)
