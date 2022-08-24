@@ -1,32 +1,26 @@
 import os
 import sys
+from time import sleep
 
-import cv2
-from scipy.signal import find_peaks
-from scipy.optimize import curve_fit
+import matplotlib.cm as cm
+import matplotlib.gridspec as gridspec
+import matplotlib.pyplot as plt
 import numpy as np
 import scipy.constants as sc
-from scipy import ndimage
-from scipy.ndimage import rotate
-from skimage.transform import resize
-from scipy.stats import binned_statistic
-from matplotlib.backends.backend_pdf import PdfPages
-from astropy.io import fits
-
-import matplotlib.pyplot as plt
-import matplotlib.cm as cm
-import cmasher as cmr
-import matplotlib.gridspec as gridspec
-from matplotlib.patches import Ellipse
-from matplotlib.colors import LogNorm, PowerNorm
 from alive_progress import alive_bar
-from time import sleep
+from astropy.io import fits
+from matplotlib.backends.backend_pdf import PdfPages
+from matplotlib.colors import PowerNorm
+from scipy import ndimage
+from scipy.optimize import curve_fit
+from scipy.signal import find_peaks
 
 np.set_printoptions(threshold=np.inf)
 
 class Surface:
 
-    def __init__(self, data=None, PA=None, inc=None, x_c=None, y_c=None, v_syst=None, distance=None, sigma=5, **kwargs):
+    def __init__(self, data=None, PA=None, inc=None, x_c=None, y_c=None, v_syst=None, distance=None, sigma=5, plot=True,
+                 **kwargs):
 
         self.cube = Cube(data)
         self.PA = PA
@@ -42,9 +36,11 @@ class Surface:
         print('rms =', rms)
 
         self._detect_surface()
-        #self._plot_traced_channels()
+        if plot:
+            self._plot_traced_channels()
         self._compute_surface()
-        #self._plot_mol_surface()
+        if plot:
+            self._plot_mol_surface()
 
         return
 
@@ -290,12 +286,16 @@ class Surface:
                     z_fit_front = (param_front[0] * (np.sort(self.r_front * self.distance) / 100)**param_front[1]) / self.distance
                     plt.plot(np.sort(self.r_front), z_fit_front, '-', markersize=1, color='blue', label='front surface - power law fit')
 
-                    print('back surface')
-                    param_back, param_cov_back = curve_fit(power_law, self.r_back * self.distance, var_back[k] * self.distance)
-                    print('z0 = ', param_back[0])
-                    print('p = ', param_back[1])
-                    z_fit_back = (param_back[0] * (np.sort(self.r_back * self.distance) / 100)**param_back[1]) / self.distance
-                    plt.plot(np.sort(self.r_back), z_fit_back, '-', markersize=1, color='gold', label='back surface - power law fit')
+                    try:
+                        print('back surface')
+                        print(power_law, self.r_back, self.distance, var_back[k])
+                        param_back, param_cov_back = curve_fit(power_law, self.r_back * self.distance, var_back[k] * self.distance)
+                        print('z0 = ', param_back[0])
+                        print('p = ', param_back[1])
+                        z_fit_back = (param_back[0] * (np.sort(self.r_back * self.distance) / 100)**param_back[1]) / self.distance
+                        plt.plot(np.sort(self.r_back), z_fit_back, '-', markersize=1, color='gold', label='back surface - power law fit')
+                    except:
+                        print('Unable to fit back surface - too few points?')
 
                 ax.set_xlabel('r [arcsec]')
                 ax.set_ylabel(plot[k]+units[k])

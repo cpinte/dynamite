@@ -1,6 +1,6 @@
 # CO_layers
 
-CO_layers  is a python package that infer the geometry and velocity of the emitting moleclar layers of a protoplanetary disk
+CO_layers  is a python package that infer the geometry and velocity of the emitting molecular layers of a protoplanetary disk
 
 
 ## Installation:
