@@ -1,18 +1,18 @@
-from scipy.ndimage import rotate
-from scipy.interpolate import interp1d
-import scipy.constants as sc
 import astropy.constants as ac
-import numpy as np
-from matplotlib.backends.backend_pdf import PdfPages
-from scipy.stats import binned_statistic
-from scipy.optimize import minimize, curve_fit
-from numpy import ndarray
-from scipy.optimize import curve_fit
-from scipy.signal import find_peaks
-from scipy import ndimage
 import matplotlib.pyplot as plt
-import casa_cube
+import numpy as np
+import scipy.constants as sc
 from alive_progress import alive_bar
+from numpy import ndarray
+from scipy import ndimage
+from scipy.ndimage import rotate
+from scipy.optimize import curve_fit
+from scipy.optimize import minimize
+from scipy.signal import find_peaks
+from scipy.stats import binned_statistic
+
+import casa_cube
+
 
 class Surface:
 
@@ -27,33 +27,40 @@ class Surface:
                  v_syst: float = None,
                  sigma: float = 10,
                  dist: float = None,
+                 exclude_inner_beam: bool = False,
                  num: int = 0,
                  plot: bool = True,
-                 std : float = None,
+                 std: float = None,
                  **kwargs):
-        '''
+        """
         Parameters
         ----------
         cube
-            Instance of an image cube of the line data, or string with path to fits cube
+            Instance of an image cube of the line data open with casa_cube, or string with path to fits cube
         PA
-            Position angle of the source in degrees, measured from east to north.
+            Position angle of the source, measured from east to north [deg]. If None, it is calculated
         inc
-            Inclination of the source in degrees.
+            Inclination of the source [deg]. If None, it is calculated
         dRA
-            offset in arcseconds
+            Offset from center in RA [arcsec]
         dDec
-            offset in arcseconds
+            Offset from center in Dec [arcsec]
         x_star
-            offset in pixels, set as nx/2 for the center
+            Star position [pixels], set as nx/2 for the center. If None, it is calculated
         y_star
-            offset in pixels, set as nx/2 for the center
+            Star position [pixels], set as nx/2 for the center. If None, it is calculated
         v_syst
-            system velocity in km/s.
-        v_mask
-            mask channels within a certain km/s range of the systematic velocity
+            System velocity [km/s]. If None, it is calculated
         sigma
-            cutt off threshold to fit surface
+            Cut off threshold to fit surface. Default is 10
+        dist
+            Distance to the source [pc] for fitting stellar mass
+        exclude_inner_beam
+            Exclude an inner radii equal to the beam size. False by default
+        plot
+            Whether to display the traces and extracted height, velocity and temperature plots
+        std
+            Standard deviation per channel. If None, it is calculated with numpy
 
         Returns
         -------
@@ -69,7 +76,7 @@ class Surface:
         Examples
         --------
 
-        '''
+        """
 
         if isinstance(cube,str):
             print("Reading cube ...")
@@ -79,6 +86,10 @@ class Surface:
         self.sigma = sigma
 
         self._initial_guess(num=num,std=std)
+
+        self.inc = inc
+
+        self.exclude_inner_beam = exclude_inner_beam
 
         if PA is not None:
             print("Forcing PA to:", PA)
@@ -100,7 +111,8 @@ class Surface:
 
         self._extract_isovelocity()
 
-        self.plot_channels(num=num+8)
+        if plot:
+            self.plot_channels(num=num+8)
 
         if inc is not None:
             print("Forcing inclination to ", inc, " deg")
@@ -114,16 +126,18 @@ class Surface:
         if dist is not None:
             self.dist = dist
             self.fit_central_mass(dist=dist)
-            self.plot_surfaces(num=num+9,m_star=self.m_star,dist=dist)
+            if plot:
+                self.plot_surfaces(num=num+9,m_star=self.m_star,dist=dist)
         else:
-            self.plot_surfaces(num=num+9)
+            if plot:
+                self.plot_surfaces(num=num+9)
 
         return
 
-
     def _initial_guess(self,num=0,std=None):
         """
-
+        Calculates standard deviation, PA, Dec, systemic velocity and stellar position. Does not override any parameters
+        if they were provided.
         """
 
         #----------------------------
@@ -190,8 +204,8 @@ class Surface:
         iv_peaks = iv_peaks[np.argsort(self.cube.velocity[iv_peaks])]
         self.iv_peaks = iv_peaks
 
-        print("Brighest channels are :", iv_peaks[:2])
-        print("Velocity of brighest channels:", self.cube.velocity[iv_peaks[:2]], "km/s")
+        print("Brightest channels are :", iv_peaks[:2])
+        print("Velocity of brightest channels:", self.cube.velocity[iv_peaks[:2]], "km/s")
 
         # Refine peak position by fitting a Gaussian
         div = np.ceil(0.25 * (iv_peaks[1]-iv_peaks[0])).astype(int)
@@ -209,7 +223,7 @@ class Surface:
             x2=np.linspace(np.min(x),np.max(x),100)
             plt.plot(x2,Gaussian_p_cst(x2,p[0],p[1],p[2],p[3]), color="C3", linestyle="--", lw=1)
 
-        plt.xlabel("Velocity (km/s$)")
+        plt.xlabel("Velocity (km/s)")
         plt.ylabel("Flux density (Jy/beam)")
 
         self.v_peaks = v_peaks
@@ -234,7 +248,7 @@ class Surface:
         iv_min = nv
         iv_max = 0
         for i in range(self.iv_min,self.iv_max):
-            if np.max(image[i,:,:]) > 15*std:
+            if np.max(image[i,:,:]) > 10*std:
                 iv_min = np.minimum(iv_min,i)
                 iv_max = np.maximum(iv_max,i)
 
@@ -242,6 +256,8 @@ class Surface:
 
         iv1 = int(iv_syst-dv)
         iv2 = int(iv_syst+dv)
+
+        print(iv_min, iv_max, iv1, iv2)
 
         plt.figure(num+1)
         plt.plot(self.cube.velocity[[iv1,iv2]], profile[[iv1,iv2]], "o")
@@ -278,7 +294,7 @@ class Surface:
         # 4. Estimated disk orientation
         #---------------------------------
 
-        # Measure centroid in 2 brighest channels
+        # Measure centroid in 2 brightest channels
         x = np.zeros(2)
         y = np.zeros(2)
         for i, iv in enumerate(iv_peaks):
@@ -292,7 +308,7 @@ class Surface:
         self.PA = PA
         print("Estimated PA of red shifted side =", PA, "deg")
 
-        if (plt.fignum_exists(num+3)):
+        if plt.fignum_exists(num + 3):
             plt.figure(num+3)
             plt.clf()
         fig3, axes3 = plt.subplots(nrows=1,ncols=2,num=num+3,figsize=(12,5),sharex=True,sharey=True)
@@ -305,7 +321,8 @@ class Surface:
             ax.plot(self.x_star,self.y_star,"*",color="white",ms=3)
 
         # Measure sign of inclination from average of 2 centroid, using a cross product with red shifted side
-        # positive inclination means that the near side of the upper surface is at the bottom of the map when the blue-shifted side is to the right
+        # positive inclination means that the near side of the upper surface is at the bottom of the map when the
+        # blue-shifted side is to the right
         self.is_inc_positive = (np.mean(x)-x_star)*(y[1]-y_star) - (np.mean(y)-y_star)*(x[1]-x_star) > 0.
 
         if self.is_inc_positive:
@@ -319,7 +336,6 @@ class Surface:
             self.inc_sign = -1
 
         return
-
 
     def _extract_isovelocity(self):
         """
@@ -343,8 +359,6 @@ class Surface:
         self.Tb = np.zeros([nv,nx,2])
         self.I = np.zeros([nv,nx,2])
 
-        surface_color = ["red","blue"]
-
         # Rotate star position
         angle = np.deg2rad(self.PA - self.inc_sign * 90.0)
         center = (np.array(cube.image.shape[1:3])-1)/2.
@@ -352,7 +366,6 @@ class Surface:
         dy = self.y_star-center[1]
         self.x_star_rot = center[0] + dx * np.cos(angle) + dy * np.sin(angle)
         self.y_star_rot = center[1] - dx * np.sin(angle) + dy * np.cos(angle)
-
 
         # Loop over the channels
         with alive_bar(int(self.iv_max-self.iv_min), title="Extracting isovelocity curves") as bar:
@@ -363,8 +376,6 @@ class Surface:
 
         #--  Additional spectral filtering to clean the data ??
 
-
-
         ou = np.where(self.n_surf>1)
         self.iv_min_surf = np.min(ou)
         self.iv_max_surf = np.max(ou)
@@ -374,9 +385,7 @@ class Surface:
 
         return
 
-
     def _extract_isovelocity_1channel(self,iv):
-
 
         if np.abs(self.cube.velocity[iv] - self.v_syst) < self.excluded_delta_v:
             self.n_surf[iv] = 0
@@ -409,9 +418,10 @@ class Surface:
             vert_profile = im[:,i]
             # find the maxima in each vertical cut, at signal above X sigma
             # ignore maxima not separated by at least a beam
-            j_max = search_maxima(vert_profile, height=self.sigma*self.std, dx=cube.bmaj/cube.pixelscale, prominence=2*self.std)
+            j_max = search_maxima(vert_profile, height=self.sigma*self.std, dx=cube.bmaj/cube.pixelscale,
+                                  prominence=2*self.std)
 
-            if (j_max.size>1): # We need at least 2 maxima to locate the surface
+            if j_max.size>1:  # We need at least 2 maxima to locate the surface
                 in_surface[i] = True
 
                 # indices of the near [0] and far [1] sides of upper surface
@@ -475,14 +485,14 @@ class Surface:
 
             y1 = np.mean(j_surf_exact[in_surface,:],axis=1)
 
-            if (len(x1) > 2):
+            if len(x1) > 2:
                 P = np.polyfit(x1,y1,1)
 
                 # x_plot = np.array([0,nx])
                 # plt.plot(x_plot, P[1] + P[0]*x_plot)
 
                 #in_surface_tmp = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) # test only front surface
-                in_surface_tmp = in_surface &  (j_surf_exact[:,0] < (P[1] + P[0]*x)) & (j_surf_exact[:,1] > (P[1] + P[0]*x))
+                in_surface_tmp = in_surface & (j_surf_exact[:,0] < (P[1] + P[0]*x)) & (j_surf_exact[:,1] > (P[1] + P[0]*x))
 
                 # We remove the weird point and reddo the fit again to ensure the slope we use is not too bad
                 x1 = x[in_surface_tmp]
@@ -558,13 +568,17 @@ class Surface:
         # -- we remove channels that are too close to the systemic velocity
         mask = mask | (np.abs(self.cube.velocity - self.v_syst) < self.excluded_delta_v)[:,np.newaxis]
 
+        # -- we remove traces at small separation, if requested
+        if self.exclude_inner_beam:
+            mask = mask | (r < self.cube.bmaj)
+
         r = np.ma.masked_array(r,mask)
         h = np.ma.masked_array(h,mask)
         v = np.ma.masked_array(v,mask)
         dv = np.ma.masked_array(dv,mask)
 
         # -- If the disc rotates in the opposite direction as expected
-        if (np.mean(v) < 0):
+        if np.mean(v) < 0:
             v = -v
 
         # -- Todo : optimize position, inclination (is that posible without a model ?), PA (need to re-run detect surface)
@@ -577,7 +591,6 @@ class Surface:
 
         return
 
-
     def compute_v_std(self,nbins=30):
 
         r = self.r.compressed()
@@ -585,23 +598,18 @@ class Surface:
         v = self.v.compressed()
         T = np.mean(self.Tb[:,:,:],axis=2).ravel()[np.invert(self.r.mask.ravel())]
 
-
-        h_std, _, _  = binned_statistic(r,h, 'std', bins=nbins)
-        v_std, _, _  = binned_statistic(r,v, 'std', bins=nbins)
-        T_std, _, _  = binned_statistic(r,T, 'std', bins=nbins)
-
-
+        h_std, _, _ = binned_statistic(r,h, 'std', bins=nbins)
+        v_std, _, _ = binned_statistic(r,v, 'std', bins=nbins)
+        T_std, _, _ = binned_statistic(r,T, 'std', bins=nbins)
 
         self.h_std = np.mean(h_std)
         self.v_std = np.mean(v_std)
         self.T_std = np.mean(T_std)
-
         self.v_std = self.v_std
 
         #self.v_std = np.mean(v_std) * np.mean(h_std) * np.mean(T_std)
 
         return
-
 
     def find_i(self,num=0):
 
@@ -640,7 +648,6 @@ class Surface:
         plt.xlabel("Inclination ($^\mathrm{o}$)")
         plt.ylabel("T dispersion")
 
-
         # Velocity dispersion
         plt.figure(num+4)
         plt.clf()
@@ -674,9 +681,9 @@ class Surface:
 
         return
 
-
     def plot_surfaces(self,
                       nbins: int = 30,
+                      v_bin_width: float = None,
                       m_star: float = None,
                       m_star_h_func: float = None,
                       h_func: ndarray = None,
@@ -684,25 +691,34 @@ class Surface:
                       plot_power_law: bool = False,
                       plot_tapered_power_law: bool = False,
                       r0: float = 1.0,
-                      num=None
+                      save = None,
+                      num = None
                       ):
-        '''
+        """
         Parameters
         ----------
         nbins
-            Number of bins to bin the data.
+            Number of bins used to bin the data during plotting.
+        v_bin_width
+            If provided, this is the fixed radial bin width [arcsec] used for the binned velocity points only. Overrides
+            nbins, though will have NaNs if a bin has no velocity points at that radial separation. exoALMA convention
+            is 0.25 * beam semi-major axis.
         m_star
-            Central mass for Keplerian rotation plot [kgs].
+            Central mass for Keplerian rotation plot [Msun].
         m_star_h_func
-            Central mass for Keplerian rotation plot based of a given height prescription [msun].
+            Central mass for Keplerian rotation plot based of a given height prescription [Msun].
         h_func
             Height prescription from a given fitted surface e.g. a power law fit.
+        dist
+            Distance to the source [pc]. Needed for saving the rotation curve in units of au (exoALMA convention)
         plot_power_law
             Fits the data with a power law and plots it.
         plot_tapered_power_law
             Fits the data with a tapered power law and plots it.
         r0
-            Reference radius for surface height fits.
+            Reference radius for surface height fits [arcsec]
+        save
+            Path as a string to save the plot.
 
         Returns
         -------
@@ -718,7 +734,7 @@ class Surface:
         Examples
         --------
 
-        '''
+        """
         r = self.r
         h = self.h
         v = self.v
@@ -730,11 +746,10 @@ class Surface:
         v_data = v.ravel().compressed()#[np.invert(mask.ravel())]
         T_data = np.mean(self.Tb[:,:,:],axis=2).ravel()[np.invert(r.mask.ravel())]
 
-
-        if (plt.fignum_exists(num)):
+        if plt.fignum_exists(num):
             plt.figure(num)
             plt.clf()
-        fig = plt.figure(num,figsize=(15,5))
+        fig = plt.figure(num,figsize=(15,5), dpi=300)
         gs = fig.add_gridspec(nrows=1,ncols=3)
         gs.update(wspace=0.2, hspace=0.05)
         ax=[]
@@ -746,45 +761,57 @@ class Surface:
         ax[0].scatter(r.ravel(),h.ravel(),alpha=0.2,s=3, c=dv.ravel(), marker='o', label = 'data', cmap="jet")
 
         bins, _, _ = binned_statistic(r_data,[r_data,h_data], bins=nbins)
-        std, _, _  = binned_statistic(r_data,h_data, 'std', bins=nbins)
+        std, _, _ = binned_statistic(r_data,h_data, 'std', bins=nbins)
 
-        ax[0].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="grey", fmt='o', mec='k', mfc='grey', ms=3, elinewidth=2, label='Binned data')
+        ax[0].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="grey", fmt='o', mec='k', mfc='grey', ms=3, elinewidth=2,
+                       label='Binned data')
 
         if plot_power_law:
             #-- fitting a power-law
             P, C = self.fit_surface_height(r0 = r0)
             x = np.linspace(np.min(r),np.max(r),100)
 
-            print('Power law fit: z0 =', P[0], ', phi =',P[1])
+            print('Power law fit: z0 = {:.5f} at {:.3f}", phi = {:.5f}'.format(P[0], r0, P[1]))
 
             ax[0].plot(x, P[0]*(x/r0)**P[1], color='k', ls='--', alpha=0.75, label='PL')
 
         if plot_tapered_power_law:
             #-- fitting a power-law
-            P, C = self.fit_surface_height(tapered_power_law = True, r0 = r0)
+            P, C = self.fit_surface_height(tapered_power_law=True, r0=r0)
             x = np.linspace(np.min(r),np.max(r),100)
 
-            print('Power law fit: z0 =', P[0], ', phi =',P[1], ', r_taper', P[2], ', q_taper =', P[3])
+            print('Power law fit: z0 = {:.5f} at {:.3f}", phi = {:.5f}, r_taper = {:.5f}, q_taper = {:.5f}'
+                  .format(P[0], r0, P[1], P[2], P[3]))
 
-            ax[0].plot(x, P[0]*((x/r0)**P[1]) * np.exp(-((x/r0)/P[2])**P[3]) , color='k', ls='-.', alpha=0.75, label='Tapered PL')
-
+            ax[0].plot(x, P[0] * ((x/r0)**P[1]) * np.exp(-(x/P[2]) ** P[3]), color='k', ls='-.', alpha=0.75,
+                       label='Tapered PL')
 
         #Velocity
-        ax[1].scatter(r.ravel(),v.ravel(),alpha=0.2,s=3,c=dv.ravel(),marker='o', label = 'Data',cmap="jet")
+        ax[1].scatter(r.ravel(),v.ravel(),alpha=0.2,s=3,c=dv.ravel(),marker='o', label='Data',cmap="jet")
 
-        bins, _, _ = binned_statistic(r_data,[r_data,v_data], bins=nbins)
-        std, _, _  = binned_statistic(r_data,v_data, 'std', bins=nbins)
+        if v_bin_width is not None:
+            nbins = int(np.nanmax(r_data)/v_bin_width)  # rounds nbins down to the nearest int
+            print('We used {} bins of width {:.4f} arcsec to bin the velocity data'.format(nbins, v_bin_width))
 
-        ax[1].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="grey", fmt='o', mec='k', mfc='grey', ms=3, elinewidth=2, label='Binned data')
+        bins, _, _ = binned_statistic(r_data, [r_data, v_data], bins=nbins)
+        std, _, _ = binned_statistic(r_data, v_data, 'std', bins=nbins)
+
+        # Generate a file with radius [au], velocity [km/s] and 1sigma dispersion [km/s] written as rows
+        if dist is not None:
+            np.savetxt("{}_radius_vs_velocity.txt".format(self.cube.filename), (bins[0, :]*dist, bins[1, :], std))
+            print("The radius [au], velocity [km/s] and 1\u03C3 dispersion [km/s] have been saved as rows to text file")
+
+        ax[1].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="grey", fmt='o', mec='k', mfc='grey', ms=3, elinewidth=2,
+                       label='Binned data')
 
         if m_star:
-            if (dist is None):
+            if dist is None:
                 raise ValueError("dist must be provided")
             v_model = self._keplerian_disc(m_star, dist)
             ax[1].scatter(r_data, v_model,alpha=0.5,s=3,color="grey",marker='o', label = 'Kep model')
 
         if m_star_h_func:
-            if (dist is None):
+            if dist is None:
                 raise ValueError("dist must be provided")
 
             v_model = self._keplerian_disc(m_star_h_func, dist, h_func=h_func)
@@ -803,13 +830,18 @@ class Surface:
 
         ax[2].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="grey", fmt='o', mec='k', mfc='grey', ms=3, elinewidth=2)
 
-        ax[0].set_ylabel('Height (")')
-        ax[1].set_ylabel('Velocity (km/s)')
-        ax[2].set_ylabel('Brightness Temperature (K)')
+        ax[0].set_ylabel('Height ["]')
+        ax[1].set_ylabel('Velocity [km/s]')
+        ax[2].set_ylabel('Brightness Temperature [K]')
 
-        ax[0].set_xlabel('Radius (")')
-        ax[1].set_xlabel('Radius (")')
-        ax[2].set_xlabel('Radius (")')
+        ax[0].set_xlabel('Radius ["]')
+        ax[1].set_xlabel('Radius ["]')
+        ax[2].set_xlabel('Radius ["]')
+
+        if save is not None and isinstance(save, str):
+            plt.savefig(save, dpi=300, bbox_inches='tight', pad_inches=0.01, format='pdf')
+
+        plt.show()
 
         return
 
@@ -830,8 +862,6 @@ class Surface:
         if self.PA is not None:
             im = np.array(rotate(im, self.PA - self.inc_sign * 90.0, reshape=False))
 
-        pix_size = cube.header['CDELT2']*3600
-
         ax.imshow(im, origin="lower", cmap='binary_r')
         ax.set_title(r'$\Delta$v='+"{:.2f}".format(cube.velocity[iv] - self.v_syst)+' , id:'+str(iv), color='k')
 
@@ -844,11 +874,9 @@ class Surface:
             #ax.set_xlim(np.min(x[iv,:n_surf[iv]]) - 10*cube.bmaj/cube.pixelscale,np.max(x[iv,:n_surf[iv]]) + 10*cube.bmaj/cube.pixelscale)
             #ax.set_ylim(np.min(y[iv,:n_surf[iv],:]) - 10*cube.bmaj/cube.pixelscale,np.max(y[iv,:n_surf[iv],:]) + 10*cube.bmaj/cube.pixelscale)
 
-        ax.plot(self.x_star_rot,self.y_star_rot,"o",color="magenta",ms=1)
+        ax.plot(self.x_star_rot,self.y_star_rot,"*",color="yellow",ms=1)
 
-        return
-
-    def plot_channels(self,n=20, num=21, radius=1.0, iv_min=None, iv_max=None):
+    def plot_channels(self,n=20, num=21, radius=1.0, iv_min=None, iv_max=None, save=False):
 
         if iv_min is None:
             iv_min=self.iv_min_surf
@@ -865,10 +893,16 @@ class Surface:
         if (plt.fignum_exists(num)):
             plt.figure(num)
             plt.clf()
-        fig, axs = plt.subplots(ncols=5, nrows=nrows, figsize=(11, 2*nrows+1),constrained_layout=True,num=num, clear=False)
+        fig, axs = plt.subplots(ncols=5, nrows=nrows, figsize=(11, 2*nrows+1),constrained_layout=True,num=num,
+                                clear=False)
 
         for i, ax in enumerate(axs.flatten()):
             self.plot_channel(int(iv_min+i*dv), radius=radius, ax=ax)
+
+        if save is not None and isinstance(save, str):
+            plt.savefig(save, dpi=300, bbox_inches='tight', pad_inches=0.01, format='pdf')
+
+        plt.show()
 
         return
 
@@ -877,13 +911,13 @@ class Surface:
         dist: float = None,
         h_func: ndarray = None,
         ):
-        '''
+        """
         Parameters
         ----------
         initial_guess
-            initial guess of central mass [kgs].
+            initial guess of central mass [Msun].
         dist
-            distance of source in pc.
+            distance of source [pc].
         h_func
             Height prescription from a given fitted surface e.g. a power law fit.
 
@@ -904,8 +938,8 @@ class Surface:
         Examples
         --------
 
-        '''
-        if (dist is None):
+        """
+        if dist is None:
             raise ValueError("dist must be provided")
 
         initial = np.array([initial_guess])
@@ -915,12 +949,12 @@ class Surface:
         print("Fitting central mass, maximum likelihood estimate:")
         self.m_star_sol = soln
         self.m_star = soln.x[0]
-        print("Central mass = ", self.m_star, "Msun")
+        print("Central mass = {:.5f} Msun".format(self.m_star))
 
         return
 
     def _ln_like(self, theta, dist, h_func = None):
-        """Compute the ln like..
+        """Compute the ln like.
         """
 
         #define param values
@@ -938,11 +972,11 @@ class Surface:
         v_error = 1/(np.mean(self.snr[:,:,:],axis=2).ravel()[np.invert(self.r.mask.ravel())])
 
         # chi2
-        chi2= np.sum(((v - v_model)**2 / v_error**2) +  np.log(2*np.pi*v_error**2))
+        chi2 = np.sum(((v - v_model)**2 / v_error**2) + np.log(2*np.pi*v_error**2))
         return 0.5 * chi2
 
     def _keplerian_disc(self, m_star, dist, h_func=None):
-        """M_star for a kerplerian disc"""
+        """M_star for a keplerian disc"""
         #Defining constants
         G = sc.G
         msun = ac.M_sun.value
@@ -961,7 +995,7 @@ class Surface:
         r0: float = 1.0,
         tapered_power_law: bool = False
         ):
-        '''
+        """
         Parameters
         ----------
         r0
@@ -983,7 +1017,7 @@ class Surface:
         Examples
         --------
 
-        '''
+        """
 
         r = np.array(self.r.ravel().compressed())
         h = self.h.ravel().compressed()
@@ -991,9 +1025,9 @@ class Surface:
 
         if tapered_power_law:
 
-            bnds = ((0.0, 0.0, 0.0, r.min()),(5.0, 5.0, 5.0, 2*r.max()))
+            bnds = ((0.0, 0.0, r.min(), r.min()),(5.0, 5.0, 5.0, 2*r.max()))
 
-            def func(r, z0, phi, q_taper, r_taper):
+            def func(r, z0, phi, r_taper, q_taper):
                 return z0*((r/r0)**phi) * np.exp(-(r/r_taper)**q_taper)
         else:
 
@@ -1001,7 +1035,6 @@ class Surface:
 
             def func(r, z0, phi):
                 return z0*(r/r0)**phi
-
 
         popt, copt = curve_fit(func, r, h, sigma = error, bounds=bnds, maxfev = 100000)
 
@@ -1064,7 +1097,6 @@ def search_maxima(y, height=None, dx=0, prominence=0):
     i_max = i_max[np.argsort(y[i_max])][::-1]
 
     return i_max
-
 
 
 def Gaussian_p_cst(x, C, A, x0, sigma):
