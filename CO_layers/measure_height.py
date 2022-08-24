@@ -248,7 +248,7 @@ class Surface:
         iv_min = nv
         iv_max = 0
         for i in range(self.iv_min,self.iv_max):
-            if np.max(image[i,:,:]) > 10*std:
+            if np.max(image[i,:,:]) > 15*std:
                 iv_min = np.minimum(iv_min,i)
                 iv_max = np.maximum(iv_max,i)
 
@@ -256,8 +256,6 @@ class Surface:
 
         iv1 = int(iv_syst-dv)
         iv2 = int(iv_syst+dv)
-
-        print(iv_min, iv_max, iv1, iv2)
 
         plt.figure(num+1)
         plt.plot(self.cube.velocity[[iv1,iv2]], profile[[iv1,iv2]], "o")
