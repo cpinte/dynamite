@@ -31,6 +31,8 @@ class Surface:
                  num: int = 0,
                  plot: bool = True,
                  std: float = None,
+                 min_iv: int = None,
+                 max_iv: int = None,
                  **kwargs):
         """
         Parameters
@@ -81,7 +83,20 @@ class Surface:
         if isinstance(cube,str):
             print("Reading cube ...")
             cube = casa_cube.Cube(cube)
+
+        # Truncating the cube is velocity if needed
+        if min_iv is not None:
+            if max_iv is None:
+                raise ValueError("max_iv is required is min_iv is provided")
+
+            print("Truncating cube in velocity")
+            cube.image = cube.image[min_iv:max_iv+1,:,:]
+            cube.velocity = cube.velocity[min_iv:max_iv+1]
+            cube.nv = max_iv-min_iv+1
+
         self.cube = cube
+
+        print("Beam", cube.bmaj, '" x ',cube.bmin,'" at PA=',cube.bpa,"deg, dv=",cube.velocity[1]-cube.velocity[0],"km/s" )
 
         self.sigma = sigma
 
@@ -146,7 +161,7 @@ class Surface:
 
         # Measure the standard deviation in 1st and last channels
         if std is None:
-            std = np.nanstd(self.cube.image[[1,-1],:,:])
+            std = np.nanstd(self.cube.image[[0,-1],:,:])
         self.std = std
 
         print("Estimated std per channel is : ", std, self.cube.unit)
@@ -164,8 +179,8 @@ class Surface:
 
         # Find the 1st and last channels with significant signal
         nv = self.cube.nv
-        iv_min = nv
-        iv_max = 0
+        iv_min = 0
+        iv_max = nv-1
         for i in range(nv):
             if np.max(image[i,:,:]) > 10*std:
                 iv_min = np.minimum(iv_min,i)
@@ -185,9 +200,9 @@ class Surface:
 
         dv = np.abs(self.cube.velocity[1]-self.cube.velocity[0])
         # We have at least 0.5km/s between peaks
-        dx = np.maximum(4,int(0.5/dv))
+        dx = np.maximum(4,int(0.25/dv))
 
-        iv_peaks = search_maxima(profile, height=10*profile_rms, dx=dx, prominence=0.2*np.max(profile))
+        iv_peaks = search_maxima(profile, height=10*profile_rms, dx=dx, prominence=2.*np.max(profile))
 
         plt.figure(num+1)
         plt.clf()
