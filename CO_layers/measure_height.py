@@ -179,8 +179,8 @@ class Surface:
 
         # Find the 1st and last channels with significant signal
         nv = self.cube.nv
-        iv_min = 0
-        iv_max = nv-1
+        iv_min = nv-1
+        iv_max = 0
         for i in range(nv):
             if np.max(image[i,:,:]) > 10*std:
                 iv_min = np.minimum(iv_min,i)
@@ -202,7 +202,7 @@ class Surface:
         # We have at least 0.5km/s between peaks
         dx = np.maximum(4,int(0.25/dv))
 
-        iv_peaks = search_maxima(profile, height=10*profile_rms, dx=dx, prominence=2.*np.max(profile))
+        iv_peaks = search_maxima(profile, height=10*profile_rms, dx=dx, prominence=0.2*np.max(profile))
 
         plt.figure(num+1)
         plt.clf()
