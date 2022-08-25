@@ -762,7 +762,7 @@ class Surface:
         if plt.fignum_exists(num):
             plt.figure(num)
             plt.clf()
-        fig = plt.figure(num,figsize=(15,5), dpi=300)
+        fig = plt.figure(num,figsize=(15,5))
         gs = fig.add_gridspec(nrows=1,ncols=3)
         gs.update(wspace=0.2, hspace=0.05)
         ax=[]
@@ -811,8 +811,9 @@ class Surface:
 
         # Generate a file with radius [au], velocity [km/s] and 1sigma dispersion [km/s] written as rows
         if dist is not None:
-            np.savetxt("{}_radius_vs_velocity.txt".format(self.cube.filename), (bins[0, :]*dist, bins[1, :], std))
-            print("The radius [au], velocity [km/s] and 1\u03C3 dispersion [km/s] have been saved as rows to text file")
+            filename = "{}_radius_vs_velocity.txt".format(self.cube.filename)
+            np.savetxt(filename, (bins[0, :]*dist, bins[1, :], std))
+            print("The radius [au], velocity [km/s] and 1\u03C3 dispersion [km/s] have been saved in "+filename)
 
         ax[1].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="grey", fmt='o', mec='k', mfc='grey', ms=3, elinewidth=2,
                        label='Binned data')
