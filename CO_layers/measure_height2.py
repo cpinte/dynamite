@@ -17,7 +17,7 @@ from scipy.signal import find_peaks
 
 np.set_printoptions(threshold=np.inf)
 
-class Surface:
+class Surface2:
 
     def __init__(self, data=None, PA=None, inc=None, x_c=None, y_c=None, v_syst=None, distance=None, sigma=5, plot=True,
                  **kwargs):
@@ -90,7 +90,7 @@ class Surface:
 
                     local_max = search_maxima(vert_profile, dx=dx, threshold=self.sigma*self.rms, rms=self.rms)
 
-                    if any(x is not None for x in local_max) is True:
+                    if any(x is not None for x in local_max):
 
                         for k in range(4):
 
@@ -103,27 +103,30 @@ class Surface:
 
                 # removing discontinuous outliers
 
-                for k in range(4):
+                for k in range(4): # k is surface index
 
                     pre_coord = None
                     pre_grad = None
                     coord = local_surf[:,k]
                     x_old = None
 
-                    for j in range(coord.size):
+                    for j in range(coord.size):  # CP : coord.size is nx
 
+
+                        # CP : what does this test do ????
+                        # I assume that it is to start the volatility calculation from the star
                         if v[iv] < self.v_syst:
                             j = j
                         else:
                             j = abs(j - (coord.size - 1))
 
                         if pre_coord is not None and x_old is not None and coord[j] != 0:
-                            grad = coord[j] / pre_coord
+                            grad = coord[j] / pre_coord  # extracted y / previous y, but this does take into account dx
 
                             if pre_grad is not None:
                                 volatility = np.std([np.log(grad),np.log(pre_grad)])
 
-                                if volatility > 0.05:
+                                if volatility > 0.05: # this basically just compute that grad and pre_grad are within 10% of each other
                                     local_surf[j,k] = 0
                                     B_surf[j,k] = 0
                                 else:
