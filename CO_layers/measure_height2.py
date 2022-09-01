@@ -1,7 +1,7 @@
 import os
 import sys
 from time import sleep
-
+import casa_cube
 import matplotlib.cm as cm
 import matplotlib.gridspec as gridspec
 import matplotlib.pyplot as plt
@@ -19,10 +19,12 @@ np.set_printoptions(threshold=np.inf)
 
 class Surface2:
 
-    def __init__(self, data=None, PA=None, inc=None, x_c=None, y_c=None, v_syst=None, distance=None, sigma=5, plot=True,
-                 **kwargs):
+    def __init__(self, cube=None, PA=None, inc=None, x_c=None, y_c=None, v_syst=None, distance=None, sigma=5, plot=False, volatility_filter=True, **kwargs):
 
-        self.cube = Cube(data)
+        if isinstance(cube,str):
+            print("Reading cube ...")
+            cube = casa_cube.Cube(cube)
+        self.cube = cube
         self.PA = PA
         self.inc = inc
         self.x_c = x_c
@@ -35,7 +37,7 @@ class Surface2:
         self.rms = rms
         print('rms =', rms)
 
-        self._detect_surface()
+        self._detect_surface(volatility_filter=volatility_filter)
         if plot:
             self._plot_traced_channels()
         self._compute_surface()
@@ -45,7 +47,7 @@ class Surface2:
         return
 
 
-    def _detect_surface(self):
+    def _detect_surface(self,volatility_filter=True):
         """
         Infer the upper emission surface from the provided cube
         extract the emission surface in each channel and loop over channels.
@@ -101,47 +103,45 @@ class Surface2:
                                 j = local_surf[i,k]
                                 B_surf[i,k] = im_rot[j,i]
 
-                # removing discontinuous outliers
+                if volatility_filter:
+                    # removing discontinuous outliers
+                    for k in range(4): # k is surface index
 
-                for k in range(4): # k is surface index
+                        pre_coord = None
+                        pre_grad = None
+                        coord = local_surf[:,k]
+                        x_old = None
 
-                    pre_coord = None
-                    pre_grad = None
-                    coord = local_surf[:,k]
-                    x_old = None
+                        for j in range(coord.size):  # CP : coord.size is nx
 
-                    for j in range(coord.size):  # CP : coord.size is nx
+                            # CP : what does this test do ????
+                            # I assume that it is to start the volatility calculation from the star
+                            if v[iv] < self.v_syst:
+                                j = j
+                            else:
+                                j = abs(j - (coord.size - 1))
 
+                            if pre_coord is not None and x_old is not None and coord[j] != 0:
+                                grad = coord[j] / pre_coord  # extracted y / previous y, but this does take into account dx
 
-                        # CP : what does this test do ????
-                        # I assume that it is to start the volatility calculation from the star
-                        if v[iv] < self.v_syst:
-                            j = j
-                        else:
-                            j = abs(j - (coord.size - 1))
+                                if pre_grad is not None:
+                                    volatility = np.std([np.log(grad),np.log(pre_grad)])
 
-                        if pre_coord is not None and x_old is not None and coord[j] != 0:
-                            grad = coord[j] / pre_coord  # extracted y / previous y, but this does take into account dx
-
-                            if pre_grad is not None:
-                                volatility = np.std([np.log(grad),np.log(pre_grad)])
-
-                                if volatility > 0.05: # this basically just compute that grad and pre_grad are within 10% of each other
-                                    local_surf[j,k] = 0
-                                    B_surf[j,k] = 0
+                                    if volatility > 0.05: # this basically just compute that grad and pre_grad are within 10% of each other
+                                        local_surf[j,k] = 0
+                                        B_surf[j,k] = 0
+                                    else:
+                                        pre_grad = grad
+                                        pre_coord = coord[j]
+                                        x_old = j
                                 else:
                                     pre_grad = grad
-                                    pre_coord = coord[j]
-                                    x_old = j
-                            else:
-                                pre_grad = grad
 
-                        if pre_coord is None and x_old is None and coord[j] != 0:
-                            pre_coord = coord[j]
-                            x_old = j
+                            if pre_coord is None and x_old is None and coord[j] != 0:
+                                pre_coord = coord[j]
+                                x_old = j
 
                 # removing slices without both points on both the upper and lower surfaces
-
                 for j in range(local_surf[:,0].size):
                     if local_surf[j,0] == 0 or local_surf[j,1] == 0:
                         local_surf[j,0] = 0
