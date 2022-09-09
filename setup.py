@@ -1,9 +1,9 @@
 from setuptools import setup
 
-setup(name='co_layers',
-      description='Infer the molecular layers of a protoplanetary disk',
-      url='http://github.com/cpinte/CO_layers',
+setup(name='dynamite',
+      description='DYNamic Analysis and MultIscale Tomography of line Emissio',
+      url='http://github.com/cpinte/dynamite',
       author='Christophe Pinte',
       license='MIT',
-      packages=['CO_layers'],
+      packages=['dynamite'],
       zip_safe=False)
