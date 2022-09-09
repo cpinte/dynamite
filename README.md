@@ -1,6 +1,6 @@
 # dynamite
 
-DYNamic Analysis and MultIscale Tomography of line Emission
+DYNamical Analysis and MultIscale Tomography of line Emission
 
 dynamite is a python package that perform kinematic and tomographic analysis of sub-mm molecular data of protoplanetary disks. 
 It follows the method presented in Pinte et al. 2018, with various improvements, to infer the geometry, velocity and temperature of the emitting molecular layers.
