@@ -1,13 +1,16 @@
-# CO_layers
+# Dynamite
 
-CO_layers  is a python package that infer the geometry and velocity of the emitting molecular layers of a protoplanetary disk
+DYNamic Analysis and Multiscale Tomography of line Emission
+
+dynamite is a python package that perform kinematic and tomographic analysis of sub-mm molecular data of protoplanetary disks. 
+It follows the method presented in Pinte et al. 2018, with various improvements to infer the geometry and velocity of the emitting molecular layers.
 
 
 ## Installation:
 
 ```
-git clone https://github.com/cpinte/CO_layers.git
-cd CO_layers
+git clone https://github.com/cpinte/dynamite.git
+cd dynamite
 python3 setup.py install
 ```
 
