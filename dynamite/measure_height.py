@@ -149,6 +149,7 @@ class Surface:
 
         return
 
+
     def _initial_guess(self,num=0,std=None):
         """
         Calculates standard deviation, PA, Dec, systemic velocity and stellar position. Does not override any parameters
@@ -406,8 +407,6 @@ class Surface:
 
         quadratic_fit = True # refine position with a quadratic fit
 
-        rotate_with_pad = False # Himanshi's rotation. There is a bug.
-
 
         if np.abs(self.cube.velocity[iv] - self.v_syst) < self.excluded_delta_v:
             self.n_surf[iv] = 0
@@ -416,14 +415,7 @@ class Surface:
         cube = self.cube
         nx = cube.nx
 
-        # Rotate the image so major axis is aligned with x-axis, and the far side is at the top
-        if rotate_with_pad:
-            im = rotate_disc(cube.image[iv,:,:], PA=self.PA - self.inc_sign * 90.0, x_c=self.x_star, y_c=self.y_star)
-            self.x_star_rot = self.x_star
-            self.y_star_rot = self.y_star
-        else:
-            im = np.array(rotate(cube.image[iv,:,:], self.PA - self.inc_sign * 90.0, reshape=False))
-
+        im = np.array(rotate(cube.image[iv,:,:], self.PA - self.inc_sign * 90.0, reshape=False))
 
         # Setting up arrays in each channel map
         in_surface = np.full(nx,False)
@@ -1182,23 +1174,3 @@ def colorbar2(mappable, shift=None, width=0.05, ax=None, trim_left=0, trim_right
         cax = fig.add_axes([xmax + shift*dx, ymin, width * dx, dy])
         cax.xaxis.set_ticks_position('top')
         return fig.colorbar(mappable, cax=cax, orientation="vertical",**kwargs)
-
-
-
-def rotate_disc(channel, PA=None, x_c=None, y_c=None):
-
-    """
-    For rotating map around defined disc centre
-    """
-
-    if PA is not None:
-        padX = [channel.shape[1] - x_c, x_c]
-        padY = [channel.shape[0] - y_c, y_c]
-        imgP = np.pad(channel, [padY, padX], 'constant')
-        imgR = ndimage.rotate(imgP, PA, reshape=False)
-        im = imgR[padY[0] : -padY[1], padX[0] : -padX[1]]
-    else:
-        print('Error! Need to specify a PA')
-        sys.exit()
-
-    return im
