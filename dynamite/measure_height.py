@@ -400,8 +400,6 @@ class Surface:
         n_scales = 2*n_scales-1 # Number of scales with a factor sqrt(2)
         f = np.sqrt(2.)
 
-        n_scales=1
-
         self.n_scales = n_scales
         self.scales = self.cube.bmin * f**(np.arange(n_scales))
 
@@ -646,6 +644,7 @@ class Surface:
         inc_rad = np.radians(self.inc)
 
 
+
         #-- Computing the radius and height for each point
         y_f = self.y_sky[:,:,:,1] - self.y_star_rot   # far side, y[channel number, x index]
         y_n = self.y_sky[:,:,:,0] - self.y_star_rot   # near side
@@ -660,14 +659,7 @@ class Surface:
         r = np.hypot(x,y) # Note : does not depend on y_star
         h = y_c / np.sin(inc_rad)
 
-        # -- If the disc is oriented the other way
-        if np.median(h) < 0:
-            h = -h
-        #if not self.is_inc_positive :
-        #    h = -h
-
         v = (self.cube.velocity[np.newaxis,:,np.newaxis] - self.v_syst) * r / (x * np.sin(inc_rad)) # does not depend on y_star
-
         dv = (self.cube.velocity[np.newaxis,:,np.newaxis] - self.v_syst) * (r/r)
 
         r *= self.cube.pixelscale
@@ -676,9 +668,7 @@ class Surface:
         # We eliminate the point where there is no detection
         mask = self.x_sky < 1
 
-        # -- we remove the points with h<0 (they correspond to values set to 0 in y)
-        # and where v is not defined
-        mask = mask | (h<0) | np.isinf(v) | np.isnan(v)
+        mask = mask | np.isinf(v) | np.isnan(v)
 
         # -- we remove channels that are too close to the systemic velocity
         mask = mask | (np.abs(self.cube.velocity - self.v_syst) < self.excluded_delta_v)[:,np.newaxis]
@@ -686,6 +676,14 @@ class Surface:
         # -- we remove traces at small separation, if requested
         if self.exclude_inner_beam:
             mask = mask | (r < self.cube.bmaj)
+
+        # -- If the disc is oriented the other way
+        if np.median(h[~mask]) < 0:
+            h = -h
+
+        # -- we can now remove the points with h<0 (they correspond to values set to 0 in y)
+        # and where v is not defined
+        mask = mask | (h<0)
 
         r = np.ma.masked_array(r,mask)
         h = np.ma.masked_array(h,mask)
