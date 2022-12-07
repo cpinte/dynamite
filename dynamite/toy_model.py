@@ -118,7 +118,7 @@ class toy_model:
         x, y = x_mid, y_mid
         for i in range(n_iter):
             r = np.sqrt(x_mid2 + y**2)
-            z = z_factor * z_fkeyunc(r) #+ w_func(r, np.arctan2(y, x))
+            z = z_factor * z_func(r) #+ w_func(r, np.arctan2(y, x))
             y = y_mid + z * tan_i
 
         return x, y, z
