@@ -854,12 +854,12 @@ class Surface:
         h = self.h
         v = self.v
         dv = np.abs(self.dv)
-        T = np.mean(self.Tb[:,:,:],axis=2)
+        T = np.mean(self.Tb[:,:,:,:],axis=3)
 
         r_data = r.ravel().compressed()#[np.invert(mask.ravel())]
         h_data = h.ravel().compressed()#[np.invert(mask.ravel())]
         v_data = v.ravel().compressed()#[np.invert(mask.ravel())]
-        T_data = np.mean(self.Tb[:,:,:],axis=2).ravel()[np.invert(r.mask.ravel())]
+        T_data = np.mean(self.Tb[:,:,:,:],axis=3).ravel()[np.invert(r.mask.ravel())]
 
         if plt.fignum_exists(num):
             plt.figure(num)
@@ -975,8 +975,9 @@ class Surface:
         n_surf = self.n_surf
 
         im = np.nan_to_num(cube.image[iv,:,:])
-        if self.PA is not None:
-            im = np.array(rotate(im, self.PA, reshape=False))
+        # Array is rotated already
+        #if self.PA is not None:
+        #    im = np.array(rotate(im, self.PA - self.inc_sign * 90.0, reshape=False))
 
         ax.imshow(im, origin="lower", cmap='binary_r')
         ax.set_title(r'$\Delta$v='+"{:.2f}".format(cube.velocity[iv] - self.v_syst)+' , id:'+str(iv), color='k')
