@@ -131,6 +131,8 @@ class Surface:
 
         self._select_scales(num=num)
 
+        self._make_multiscale_cube()
+
         self._extract_isovelocity()
 
         # Making plots
@@ -439,7 +441,6 @@ class Surface:
         # Loop over the channels
         with alive_bar(int(self.iv_max-self.iv_min), title="Extracting isovelocity curves") as bar:
             for iv in range(self.iv_min,self.iv_max):
-                # Loop over scales
                 for iscale in range(self.n_scales):
                     self._extract_isovelocity_1channel(iv,iscale)
                 bar()
@@ -457,6 +458,51 @@ class Surface:
         return
 
 
+    def _make_multiscale_cube(self):
+
+        self.multiscale_bmaj=np.zeros(self.n_scales)
+        self.multiscale_bmin=np.zeros(self.n_scales)
+        self.multiscale_std=np.zeros(self.n_scales)
+
+        self.multiscale_bmaj[0] = self.cube.bmaj
+        self.multiscale_bmin[0] = self.cube.bmin
+
+        self.multiscale_std[0] = self.cube.std
+
+        # Loop over scales
+        for iscale in range(self.n_scales):
+
+            if iscale > 0:
+                taper = self.scales[iscale]
+                # --- Convolution : note : todo: we only want to rotate once as this slow
+                if taper < self.cube.bmaj:
+                    delta_bmaj = self.cube.pixelscale * FWHM_to_sigma # sigma will be 1 pixel
+                    bmaj = self.cube.bmaj + delta_bmaj
+                else:
+                    delta_bmaj = np.sqrt(taper ** 2 - self.cube.bmaj ** 2)
+                    bmaj = taper
+                delta_bmin = np.sqrt(taper ** 2 - self.cube.bmin ** 2)
+                bmin = taper
+
+                sigma_x = delta_bmin / self.cube.pixelscale * FWHM_to_sigma  # in pixels
+                sigma_y = delta_bmaj / self.cube.pixelscale * FWHM_to_sigma  # in pixels
+
+                beam = Gaussian2DKernel(sigma_x, sigma_y, self.cube.bpa * np.pi / 180)
+
+                with alive_bar(int(self.iv_max-self.iv_min), title="Making multi-scale cube: scale #"+str(iscale)) as bar:
+                    for iv in range(self.iv_min,self.iv_max):
+                        im = self.rotated_images[0,iv-self.iv_min,:,:]
+                        self.rotated_images[iscale,iv-self.iv_min,:,:] = convolve_fft(im, beam)
+                        bar()
+
+                self.multiscale_bmaj[iscale] = bmaj
+                self.multiscale_bmin[iscale] = bmin
+
+                self.multiscale_std[iscale] = self.cube.std * bmaj * bmin / (self.cube.bmaj * self.cube.bmin)
+
+        return
+
+
     def _extract_isovelocity_1channel(self,iv,iscale=0):
 
         clean_method1 = True # removing points where the upper surface or average surface is below star at a given x
@@ -469,36 +515,13 @@ class Surface:
             self.n_surf[iscale,iv] = 0
             return
 
-        im = self.rotated_images[0,iv-self.iv_min,:,:]
         nx = self.cube.nx
 
-        std = self.cube.std
-        bmaj = self.cube.bmaj
-        bmin = self.cube.bmin
+        im = self.rotated_images[iscale,iv-self.iv_min,:,:]
+        std = self.multiscale_std[iscale]
+        bmaj = self.multiscale_bmaj[iscale]
 
-        if iscale > 0:
-            taper = self.scales[iscale]
-            # --- Convolution : note : todo: we only want to rotate once as this slow
-            if taper < self.cube.bmaj:
-                delta_bmaj = self.cube.pixelscale * FWHM_to_sigma # sigma will be 1 pixel
-                bmaj = self.cube.bmaj + delta_bmaj
-            else:
-                delta_bmaj = np.sqrt(taper ** 2 - self.cube.bmaj ** 2)
-                bmaj = taper
-            delta_bmin = np.sqrt(taper ** 2 - self.cube.bmin ** 2)
-            bmin = taper
-
-            sigma_x = delta_bmin / self.cube.pixelscale * FWHM_to_sigma  # in pixels
-            sigma_y = delta_bmaj / self.cube.pixelscale * FWHM_to_sigma  # in pixels
-
-            beam = Gaussian2DKernel(sigma_x, sigma_y, self.cube.bpa * np.pi / 180)
-            im = convolve_fft(im, beam)
-            self.rotated_images[iscale,iv-self.iv_min,:,:] = im
-
-            # We need to remeasure the noise
-            #print("todo : re-measure noise ?")
-            std = self.cube.std * bmaj * bmin / (self.cube.bmaj * self.cube.bmin)
-
+        print("test ", iscale, bmaj)
 
         # Setting up arrays in each channel map
         in_surface = np.full(nx,False)
