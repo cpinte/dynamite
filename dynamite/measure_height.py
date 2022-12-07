@@ -14,6 +14,9 @@ from astropy.convolution import Gaussian2DKernel, convolve, convolve_fft
 
 import casa_cube
 
+sigma_to_FWHM = 2.0 * np.sqrt(2.0 * np.log(2))
+FWHM_to_sigma = 1.0 / sigma_to_FWHM
+arcsec = np.pi / 648000
 
 class Surface:
 
@@ -103,8 +106,6 @@ class Surface:
 
         self._initial_guess(num=num,std=std)
 
-        self.inc = inc
-
         self.exclude_inner_beam = exclude_inner_beam
 
         if PA is not None:
@@ -127,8 +128,10 @@ class Surface:
 
         # This is where the actual work happens
         self._rotate_cube()
+
+        self._select_scales(num=num)
+
         self._extract_isovelocity()
-        self._compute_surface()
 
         # Making plots
         if plot:
@@ -140,6 +143,8 @@ class Surface:
         else:
             print("Estimating inclination:")
             self.find_i(num)
+
+        self._compute_surface()
 
         if dist is not None:
             self.dist = dist
@@ -164,10 +169,8 @@ class Surface:
         #----------------------------
 
         # Measure the standard deviation in 1st and last channels
-        if std is None:
-            std = np.nanstd(self.cube.image[[0,-1],:,:])
-        self.std = std
-
+        self.cube.get_std()
+        std = self.cube.std
         print("Estimated std per channel is : ", std, self.cube.unit)
 
         # Image cube with no NaN
@@ -197,8 +200,7 @@ class Surface:
         print("i.e. velocity range:", self.cube.velocity[[iv_min, iv_max]], "km/s")
 
         # Extracting the 2 brightest channels and estimate v_syst
-        im = np.where(image > 3*std, image, 0)
-        profile = np.sum(im, axis=(1,2)) / self.cube._beam_area_pix()
+        profile = self.cube.get_line_profile(threshold=3*self.cube.std)
 
         profile_rms = np.std(profile[:np.maximum(iv_min,10)])
 
@@ -358,7 +360,7 @@ class Surface:
 
         # Rotate star position
         angle = np.deg2rad(self.PA - self.inc_sign * 90.0)
-        center = (np.array(cube.image.shape[1:3])-1)/2.
+        center = (np.array(self.cube.image.shape[1:3])-1)/2.
         dx = self.x_star-center[0]
         dy = self.y_star-center[1]
         self.x_star_rot = center[0] + dx * np.cos(angle) + dy * np.sin(angle)
@@ -367,34 +369,49 @@ class Surface:
         with alive_bar(int(self.iv_max-self.iv_min), title="Rotating cube") as bar:
             for iv in range(self.iv_min,self.iv_max):
                 self.cube.image[iv,:,:] = np.array(rotate(self.cube.image[iv,:,:], self.PA - self.inc_sign * 90.0, reshape=False))
+                bar()
 
         return
 
 
-    def _select_scales(self):
+    def _select_scales(self,num=0):
         # Estimating the taper to use for the multi-scale analysis
         #  2**n/2 * bmin up to a fraction of the disk size along semi-major axis
 
-        M0 = self.cube.get_moment_map(moment=0, threshold=5*self.std, v_minmax=v_minmax)
+        plt.figure(num+4)
+        plt.clf()
+        self.cube.plot(moment=0, threshold=5*self.cube.std, iv_support=np.arange(self.iv_min,self.iv_max+1),axes_unit="pixel")
+        M0 = self.cube.last_image
+        self.M0 = M0
 
-        disk_size = 0 # (Max - Min x)  * pixelscale
-        n_beams = disk_size/bmin
+        # Find x index of pixels with signals
+        ou = np.where(np.isfinite(np.nanmax(M0,axis=0)))
+        disk_size = (np.max(ou) - np.min(ou))  * self.cube.pixelscale
 
-        print("We found ", n_beams, " beams accros the disk semi-major axis")
+        print("Disk size is ", disk_size, " arcsec")
+
+        n_beams = disk_size/self.cube.bmin
+
+        print("There are ", n_beams, " beams accros the disk semi-major axis")
 
         # We want at least 5 beams per side of the disk
-        n_scales = int(np.ceil(np.log2(n_beams/10.))) # Number of scales with a factor 2
+        n_scales = int(np.ceil(np.log2(n_beams/8.))) # Number of scales with a factor 2
 
         n_scales = 2*n_scales-1 # Number of scales with a factor sqrt(2)
         f = np.sqrt(2.)
 
+        n_scales=1
+
         self.n_scales = n_scales
-        self.taper = self.bmin * f**np.arange(n_scales)
+        self.scales = self.cube.bmin * f**(np.arange(n_scales))
+
+        print("Using ", n_scales, " scales")
+        print("Scales are ", self.scales, " arcsec")
 
         return
 
 
-    def _extract_isovelocity(self,scale=0):
+    def _extract_isovelocity(self):
         """
         Infer the upper emission surface from the provided cube
         extract the emission surface in each channel and loop over channels
@@ -422,23 +439,24 @@ class Surface:
         with alive_bar(int(self.iv_max-self.iv_min), title="Extracting isovelocity curves") as bar:
             for iv in range(self.iv_min,self.iv_max):
                 # Loop over scales
-                for scale in self.scales:
-                    self._extract_isovelocity_1channel(iv,scale)
+                for iscale in range(self.n_scales):
+                    self._extract_isovelocity_1channel(iv,iscale)
                 bar()
 
         #--  Additional spectral filtering to clean the data ??
 
-        ou = np.where(self.n_surf>1)
+
+        ou = np.where(self.n_surf[0,:]>1)
         self.iv_min_surf = np.min(ou)
         self.iv_max_surf = np.max(ou)
         print("Surfaces detected between channels", self.iv_min_surf, "and", self.iv_max_surf)
 
-        self.snr = self.I/self.std
+        self.snr = self.I/self.cube.std
 
         return
 
 
-    def _extract_isovelocity_1channel(self,iv,scale=0):
+    def _extract_isovelocity_1channel(self,iv,iscale=0):
 
         clean_method1 = True # removing points where the upper surface or average surface is below star at a given x
         clean_method2 = True # removing points that deviate a lot as a function of x
@@ -447,30 +465,37 @@ class Surface:
         quadratic_fit = True # refine position with a quadratic fit
 
         if np.abs(self.cube.velocity[iv] - self.v_syst) < self.excluded_delta_v:
-            self.n_surf[iv] = 0
+            self.n_surf[iscale,iv] = 0
             return
 
         im = self.cube.image[iv,:,:]
-        nx = cube.nx
+        nx = self.cube.nx
 
-        if scale > 0:
+        std = self.cube.std
+        bmaj = self.cube.bmaj
+        bmin = self.cube.bmin
+
+        if iscale > 0:
+            taper = self.scales[iscale]
             # --- Convolution : note : todo: we only want to rotate once as this slow
-            psf = self.taper[scale]
-
-            if taper[scale] < self.bmaj:
-                delta_bmaj = self.pixelscale * FWHM_to_sigma # sigma will be 1 pixel
+            if taper < self.cube.bmaj:
+                delta_bmaj = self.cube.pixelscale * FWHM_to_sigma # sigma will be 1 pixel
+                bmaj = self.cube.bmaj + delta_bmaj
             else:
-                delta_bmaj = np.sqrt(psf ** 2 - self.bmaj ** 2)
-            delta_bmin = np.sqrt(psf ** 2 - self.bmin ** 2)
+                delta_bmaj = np.sqrt(taper ** 2 - self.cube.bmaj ** 2)
+                bmaj = taper
+            delta_bmin = np.sqrt(taper ** 2 - self.cube.bmin ** 2)
+            bmin = taper
 
-            sigma_x = delta_bmin / self.pixelscale * FWHM_to_sigma  # in pixels
-            sigma_y = delta_bmaj / self.pixelscale * FWHM_to_sigma  # in pixels
+            sigma_x = delta_bmin / self.cube.pixelscale * FWHM_to_sigma  # in pixels
+            sigma_y = delta_bmaj / self.cube.pixelscale * FWHM_to_sigma  # in pixels
 
-            beam = Gaussian2DKernel(sigma_x, sigma_y, self.bpa * np.pi / 180)
+            beam = Gaussian2DKernel(sigma_x, sigma_y, self.cube.bpa * np.pi / 180)
             im = convolve_fft(im, beam)
 
             # We need to remeasure the noise
-
+            #print("todo : re-measure noise ?")
+            std = self.cube.std * bmaj * bmin / (self.cube.bmaj * self.cube.bmin)
 
 
         # Setting up arrays in each channel map
@@ -498,8 +523,8 @@ class Surface:
             # find the maxima in each vertical cut, at signal above X sigma
             # ignore maxima not separated by at least a beam
             # maxima are ordered by decarasing flux
-            j_max = search_maxima(vert_profile, height=self.sigma*self.std, dx=cube.bmaj/cube.pixelscale,
-                                  prominence=2*self.std)
+            j_max = search_maxima(vert_profile, height=self.sigma*std, dx=bmaj/self.cube.pixelscale,
+                                  prominence=2*std)
 
             if j_max.size>1:  # We need at least 2 maxima to locate the surface
                 in_surface[i] = True
@@ -551,7 +576,7 @@ class Surface:
                         j_surf_exact[i,k] = j
                         I_surf[i,k] = im[j,i]
 
-                T_surf[i,k] = cube._Jybeam_to_Tb(I_surf[i,k]) # Converting to Tb (currently assuming the cube is in Jy/beam)
+                T_surf[i,k] = self.cube._Jybeam_to_Tb(I_surf[i,k]) # Converting to Tb (currently assuming the cube is in Jy/beam)
 
         #-- Now we try to clean out a bit the surfaces we have extracted
 
@@ -592,12 +617,12 @@ class Surface:
 
         # Saving the data
         n = np.sum(in_surface) # number of points in that surface
-        self.n_surf[iv] = n
+        self.n_surf[iscale,iv] = n
         if n:
-            self.x_sky[iv,:n] = x[in_surface]
-            self.y_sky[iv,:n,:] = j_surf_exact[in_surface,:]
-            self.Tb[iv,:n,:] = T_surf[in_surface,:]
-            self.I[iv,:n,:] = I_surf[in_surface,:]
+            self.x_sky[iscale,iv,:n] = x[in_surface]
+            self.y_sky[iscale,iv,:n,:] = j_surf_exact[in_surface,:]
+            self.Tb[iscale,iv,:n,:] = T_surf[in_surface,:]
+            self.I[iscale,iv,:n,:] = I_surf[in_surface,:]
 
         return
 
@@ -622,8 +647,8 @@ class Surface:
 
 
         #-- Computing the radius and height for each point
-        y_f = self.y_sky[:,:,1] - self.y_star_rot   # far side, y[channel number, x index]
-        y_n = self.y_sky[:,:,0] - self.y_star_rot   # near side
+        y_f = self.y_sky[:,:,:,1] - self.y_star_rot   # far side, y[channel number, x index]
+        y_n = self.y_sky[:,:,:,0] - self.y_star_rot   # near side
         y_c = 0.5 * (y_f + y_n)
         #y_c = np.ma.masked_array(y_c,mask).compressed()
 
@@ -635,17 +660,15 @@ class Surface:
         r = np.hypot(x,y) # Note : does not depend on y_star
         h = y_c / np.sin(inc_rad)
 
-
-
         # -- If the disc is oriented the other way
         if np.median(h) < 0:
             h = -h
         #if not self.is_inc_positive :
         #    h = -h
 
-        v = (self.cube.velocity[:,np.newaxis] - self.v_syst) * r / (x * np.sin(inc_rad)) # does not depend on y_star
+        v = (self.cube.velocity[np.newaxis,:,np.newaxis] - self.v_syst) * r / (x * np.sin(inc_rad)) # does not depend on y_star
 
-        dv = (self.cube.velocity[:,np.newaxis] - self.v_syst) * (r/r)
+        dv = (self.cube.velocity[np.newaxis,:,np.newaxis] - self.v_syst) * (r/r)
 
         r *= self.cube.pixelscale
         h *= self.cube.pixelscale
@@ -688,7 +711,7 @@ class Surface:
         r = self.r.compressed()
         h = self.h.compressed()
         v = self.v.compressed()
-        T = np.mean(self.Tb[:,:,:],axis=2).ravel()[np.invert(self.r.mask.ravel())]
+        T = np.mean(self.Tb[:,:,:,:],axis=3).ravel()[np.invert(self.r.mask.ravel())]
 
         h_std, _, _ = binned_statistic(r,h, 'std', bins=nbins)
         v_std, _, _ = binned_statistic(r,v, 'std', bins=nbins)
@@ -704,7 +727,6 @@ class Surface:
         return
 
     def find_i(self,num=0):
-
 
         # Altitude dispersion
         plt.figure(num+5)
@@ -939,7 +961,7 @@ class Surface:
 
         return
 
-    def plot_channel(self, iv, radius=3.0, ax=None, clear=True):
+    def plot_channel(self, iv, iscale=0, radius=3.0, ax=None, clear=True):
 
         if ax is None:
             ax = plt.gca()
@@ -954,15 +976,15 @@ class Surface:
 
         im = np.nan_to_num(cube.image[iv,:,:])
         if self.PA is not None:
-            im = np.array(rotate(im, self.PA - self.inc_sign * 90.0, reshape=False))
+            im = np.array(rotate(im, self.PA, reshape=False))
 
         ax.imshow(im, origin="lower", cmap='binary_r')
         ax.set_title(r'$\Delta$v='+"{:.2f}".format(cube.velocity[iv] - self.v_syst)+' , id:'+str(iv), color='k')
 
-        if n_surf[iv]:
-            ax.plot(x[iv,:n_surf[iv]],y[iv,:n_surf[iv],0],"o",color="red",markersize=1)
-            ax.plot(x[iv,:n_surf[iv]],y[iv,:n_surf[iv],1],"o",color="blue",markersize=1)
-            ax.plot(x[iv,:n_surf[iv]],np.mean(y[iv,:n_surf[iv],:],axis=1),"o",color="white",markersize=1)
+        if n_surf[iscale,iv]:
+            ax.plot(x[iscale,iv,:n_surf[iscale,iv]],y[iscale,iv,:n_surf[iscale,iv],0],"o",color="red",markersize=1)
+            ax.plot(x[iscale,iv,:n_surf[iscale,iv]],y[iscale,iv,:n_surf[iscale,iv],1],"o",color="blue",markersize=1)
+            ax.plot(x[iscale,iv,:n_surf[iscale,iv]],np.mean(y[iscale,iv,:n_surf[iscale,iv],:],axis=1),"o",color="white",markersize=1)
 
             # We zoom on the detected surfaces
             #ax.set_xlim(np.min(x[iv,:n_surf[iv]]) - 10*cube.bmaj/cube.pixelscale,np.max(x[iv,:n_surf[iv]]) + 10*cube.bmaj/cube.pixelscale)
@@ -970,11 +992,10 @@ class Surface:
 
         ax.plot(self.x_star_rot,self.y_star_rot,"*",color="yellow",ms=3)
 
-    def plot_channels(self,n=20, num=21, radius=1.0, iv_min=None, iv_max=None, save=False):
+    def plot_channels(self,n=20, num=21, radius=1.0, iv_min=None, iv_max=None, save=False, iscale=0):
 
         if iv_min is None:
             iv_min=self.iv_min_surf
-
         if iv_max is None:
             iv_max = self.iv_max_surf
 
@@ -991,7 +1012,7 @@ class Surface:
                                 clear=False)
 
         for i, ax in enumerate(axs.flatten()):
-            self.plot_channel(int(iv_min+i*dv), radius=radius, ax=ax)
+            self.plot_channel(int(iv_min+i*dv), iscale=iscale, radius=radius, ax=ax)
 
         if save is not None and isinstance(save, str):
             plt.savefig(save, dpi=300, bbox_inches='tight', pad_inches=0.01, format='pdf')
