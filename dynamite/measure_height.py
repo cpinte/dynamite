@@ -406,6 +406,9 @@ class Surface:
         print("Using ", n_scales, " scales")
         print("Scales are ", self.scales, " arcsec")
 
+        self.rotated_images = np.zeros((self.n_scales,self.iv_max-self.iv_min+1,self.cube.ny,self.cube.nx))
+        self.rotated_images[0,:,:,:] = self.cube.image[self.iv_min:self.iv_max+1,:,:]
+
         return
 
 
@@ -466,7 +469,7 @@ class Surface:
             self.n_surf[iscale,iv] = 0
             return
 
-        im = self.cube.image[iv,:,:]
+        im = self.rotated_images[0,iv-self.iv_min,:,:]
         nx = self.cube.nx
 
         std = self.cube.std
@@ -490,6 +493,7 @@ class Surface:
 
             beam = Gaussian2DKernel(sigma_x, sigma_y, self.cube.bpa * np.pi / 180)
             im = convolve_fft(im, beam)
+            self.rotated_images[iscale,iv-self.iv_min,:,:] = im
 
             # We need to remeasure the noise
             #print("todo : re-measure noise ?")
@@ -805,7 +809,8 @@ class Surface:
                       plot_tapered_power_law: bool = False,
                       r0: float = 1.0,
                       save = None,
-                      num = None
+                      num = None,
+                      scales = None
                       ):
         """
         Parameters
@@ -848,16 +853,16 @@ class Surface:
         --------
 
         """
-        r = self.r
-        h = self.h
-        v = self.v
-        dv = np.abs(self.dv)
-        T = np.mean(self.Tb[:,:,:,:],axis=3)
+        r = self.r[scales,:,:]
+        h = self.h[scales,:,:]
+        v = self.v[scales,:,:]
+        dv = np.abs(self.dv[scales,:,:])
+        T = np.mean(self.Tb[scales,:,:,:],axis=4)
 
         r_data = r.ravel().compressed()#[np.invert(mask.ravel())]
         h_data = h.ravel().compressed()#[np.invert(mask.ravel())]
         v_data = v.ravel().compressed()#[np.invert(mask.ravel())]
-        T_data = np.mean(self.Tb[:,:,:,:],axis=3).ravel()[np.invert(r.mask.ravel())]
+        T_data = T.ravel()[np.invert(r.mask.ravel())]
 
         if plt.fignum_exists(num):
             plt.figure(num)
@@ -972,7 +977,7 @@ class Surface:
         y = self.y_sky
         n_surf = self.n_surf
 
-        im = np.nan_to_num(cube.image[iv,:,:])
+        im = np.nan_to_num(self.rotated_images[iscale,iv-self.iv_min,:,:])
         # Array is rotated already
         #if self.PA is not None:
         #    im = np.array(rotate(im, self.PA - self.inc_sign * 90.0, reshape=False))
