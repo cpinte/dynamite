@@ -397,7 +397,7 @@ class Surface:
         print("There are ", n_beams, " beams accros the disk semi-major axis")
 
         # We want at least 5 beams per side of the disk
-        n_scales = int(np.ceil(np.log2(n_beams/8.))) # Number of scales with a factor 2
+        n_scales = int(np.ceil(np.log2(n_beams/4.))) # Number of scales with a factor 2
 
         n_scales = 2*n_scales-1 # Number of scales with a factor sqrt(2)
         f = np.sqrt(2.)
@@ -408,7 +408,7 @@ class Surface:
         print("Using ", n_scales, " scales")
         print("Scales are ", self.scales, " arcsec")
 
-        self.rotated_images = np.zeros((self.n_scales,self.iv_max-self.iv_min+1,self.cube.ny,self.cube.nx))
+        self.rotated_images = np.zeros((self.n_scales,self.iv_max-self.iv_min+1,self.cube.ny,self.cube.nx), dtype=np.float32)
         self.rotated_images[0,:,:,:] = self.cube.image[self.iv_min:self.iv_max+1,:,:]
 
         return
@@ -498,7 +498,7 @@ class Surface:
                 self.multiscale_bmaj[iscale] = bmaj
                 self.multiscale_bmin[iscale] = bmin
 
-                self.multiscale_std[iscale] = self.cube.std * bmaj * bmin / (self.cube.bmaj * self.cube.bmin)
+                self.multiscale_std[iscale] = self.cube.std * (self.cube.bmaj * self.cube.bmin) / (bmaj * bmin)
 
         return
 
@@ -521,8 +521,6 @@ class Surface:
         std = self.multiscale_std[iscale]
         bmaj = self.multiscale_bmaj[iscale]
 
-        print("test ", iscale, bmaj)
-
         # Setting up arrays in each channel map
         in_surface = np.full(nx,False)
         j_surf = np.zeros([nx,2], dtype=int)
@@ -537,10 +535,6 @@ class Surface:
         else:
             i1=int(np.floor(self.x_star_rot))+2
             i2=nx
-
-        # TMP : to be deleted, only for testing when filtering is off
-        i1=0
-        i2=nx
 
         # Loop over the pixels along the x-axis to find surface
         for i in range(i1,i2):
