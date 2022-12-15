@@ -397,7 +397,7 @@ class Surface:
         print("There are ", n_beams, " beams accros the disk semi-major axis")
 
         # We want at least 5 beams per side of the disk
-        n_scales = int(np.ceil(np.log2(n_beams/4.))) # Number of scales with a factor 2
+        n_scales = int(np.ceil(np.log2(n_beams/3.))) # Number of scales with a factor 2
 
         n_scales = 2*n_scales-1 # Number of scales with a factor sqrt(2)
         f = np.sqrt(2.)
@@ -489,6 +489,13 @@ class Surface:
 
                 beam = Gaussian2DKernel(sigma_x, sigma_y, self.cube.bpa * np.pi / 180)
 
+                # Measure new std
+                #self.multiscale_std[iscale] = self.cube.std * (self.cube.bmaj * self.cube.bmin) / (bmaj * bmin) # this underestimayte std at at high scales
+                im = convolve_fft(self.cube.image[0,:,:], beam)
+                im1 = convolve_fft(self.cube.image[-1,:,:], beam)
+                self.multiscale_std[iscale] = np.nanstd([im,im1])
+
+                # Make the multiscale cube
                 with alive_bar(int(self.iv_max-self.iv_min), title="Making multi-scale cube: scale #"+str(iscale)) as bar:
                     for iv in range(self.iv_min,self.iv_max):
                         im = self.rotated_images[0,iv-self.iv_min,:,:]
@@ -497,8 +504,6 @@ class Surface:
 
                 self.multiscale_bmaj[iscale] = bmaj
                 self.multiscale_bmin[iscale] = bmin
-
-                self.multiscale_std[iscale] = self.cube.std * (self.cube.bmaj * self.cube.bmin) / (bmaj * bmin)
 
         return
 
