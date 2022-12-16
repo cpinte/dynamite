@@ -1,3 +1,11 @@
+# todo :
+# - after 1extraction, fit surface with GP
+# - get isovelocity curve
+# - find maxima along the perpendicular of the isovelocity curve
+# - iterate
+# - after some iterations, ignore points that are far from the isovelocity curve
+
+
 import astropy.constants as ac
 import matplotlib.pyplot as plt
 import numpy as np
@@ -6,11 +14,13 @@ from alive_progress import alive_bar
 from numpy import ndarray
 from scipy import ndimage
 from scipy.ndimage import rotate
-from scipy.optimize import curve_fit
+from scipy.optimize import curve_fit, minimize
 from scipy.optimize import minimize
 from scipy.signal import find_peaks
 from scipy.stats import binned_statistic
 from astropy.convolution import Gaussian2DKernel, convolve, convolve_fft
+import celerite
+from celerite import terms
 
 import casa_cube
 
@@ -829,6 +839,7 @@ class Surface:
                       dist: float = None,
                       plot_power_law: bool = False,
                       plot_tapered_power_law: bool = False,
+                      plot_gp: bool = False,
                       r0: float = 1.0,
                       save = None,
                       num = None,
@@ -906,6 +917,8 @@ class Surface:
         ax[0].errorbar(bins[0,:], bins[1,:],yerr=std, ecolor="grey", fmt='o', mec='k', mfc='grey', ms=3, elinewidth=2,
                        label='Binned data')
 
+
+
         if plot_power_law:
             #-- fitting a power-law
             P, C = self.fit_surface_height(r0 = r0)
@@ -925,6 +938,14 @@ class Surface:
 
             ax[0].plot(x, P[0] * ((x/r0)**P[1]) * np.exp(-(x/P[2]) ** P[3]), color='k', ls='-.', alpha=0.75,
                        label='Tapered PL')
+
+        if plot_gp:
+            t, mu, std = self.fit_surface_height_gp()
+            # Plot the data
+            color = "#ff7f0e"
+            ax[0].plot(t, mu, color="red", markersize=1.0)
+            ax[0].fill_between(t, mu+std, mu-std, color=color, alpha=0.3, edgecolor="none")
+
 
         #Velocity
         ax[1].scatter(r.ravel(),v.ravel(),alpha=0.2,s=3,c=dv.ravel(),marker='o', label='Data',cmap="jet")
@@ -1180,6 +1201,52 @@ class Surface:
         popt, copt = curve_fit(func, r, h, sigma = error, bounds=bnds, maxfev = 100000)
 
         return popt, copt
+
+
+    def fit_surface_height_gp(self):
+
+        x = np.array(self.r.ravel().compressed())
+        y = self.h.ravel().compressed()
+        yerr = 1/(np.mean(self.snr[:,:,:,:],axis=3).ravel()[np.invert(self.r.mask.ravel())])
+
+        order=np.argsort(x)
+        x=x[order]
+        y=y[order]
+        yerr=yerr[order]
+
+        # Set up the GP model
+        k0 = terms.JitterTerm(log_sigma=np.log(np.var(y)))
+        k1 = terms.RealTerm(log_a=np.log(np.var(y)), log_c=np.log(50))
+        k2 = terms.RealTerm(log_a=np.log(np.var(y)), log_c=np.log(5))
+        kernel = k0+k1+k2
+        kernel = k0+k2
+        gp = celerite.GP(kernel, fit_mean=False)
+
+        # Define a cost function
+        def neg_log_like(params, y, gp):
+            gp.set_parameter_vector(params)
+            return -gp.log_likelihood(y)
+
+        def grad_neg_log_like(params, y, gp):
+            gp.set_parameter_vector(params)
+            return -gp.grad_log_likelihood(y)[1]
+
+        gp.compute(x, yerr)
+
+        initial_params = gp.get_parameter_vector()
+        bounds = gp.get_parameter_bounds()
+
+        #soln = minimize(nll, initial_params, jac=True)
+        soln = minimize(neg_log_like, initial_params, jac=grad_neg_log_like,method="L-BFGS-B", bounds=bounds, args=(y, gp))
+        gp.set_parameter_vector(soln.x)
+
+        # Make the maximum likelihood prediction
+        t = np.linspace(np.min(x), np.max(x), 500)
+
+        mu, var = gp.predict(y, t, return_var=True)
+        std = np.sqrt(var)
+
+        return t, mu, std
 
 
 def search_maxima_old(y, height=None, dx=0, prominence=0):
