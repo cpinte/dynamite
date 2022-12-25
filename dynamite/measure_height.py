@@ -20,6 +20,7 @@ from scipy import ndimage
 from scipy.ndimage import rotate
 from scipy.optimize import curve_fit, minimize
 from scipy.optimize import minimize
+from scipy.interpolate import interp1d
 from scipy.signal import find_peaks
 from scipy.stats import binned_statistic
 from astropy.convolution import Gaussian2DKernel, convolve, convolve_fft
@@ -666,6 +667,7 @@ class Surface:
 
         return
 
+
     def _refine_isovelocity_1channel(self,iv,iscale=0):
         # Find iteratively the maxima along the perpendicular to the isovelocity curve
         # then remap on the initial regular x_spacing so we can compute the altitude
@@ -680,51 +682,42 @@ class Surface:
         f =  nbeams*self.multiscale_bmaj[iscale] / self.cube.pixelscale
         npix = int(np.floor(f)) # number of "pixels" along cut
 
-        print(x)
-
         x_new = np.zeros(n)
         y_new = np.zeros(n)
 
-        for i in range(n-1):
-            if i>0:
-                xc = x[i]
-                yc = y[i]
+        for i in range(n):
+            xc = x[i]
+            yc = y[i]
 
-                dy = x[i+1]-x[i-1]
-                dx = y[i+1]-y[i-1]
+            j = np.maximum(np.minimum(i,n-2),1) # dealing with ends
+            dy = x[j+1]-x[j-1]
+            dx = y[j+1]-y[j-1]
 
-                norm = np.sqrt(dx**2 + dy**2)
-                dy /= norm
-                dx /= norm
+            norm = np.sqrt(dx**2 + dy**2)
+            dy /= norm
+            dx /= norm
 
-                # We flip sign of cut if dx is <0
-                if dx<0:
-                    dx=-dx
-                    dy=-dy
+            # We flip sign of cut if dx is <0
+            if dx<0:
+                dx=-dx
+                dy=-dy
 
-                x0 = xc - f * dx
-                y0 = yc - f * dy
+            x0 = xc - f * dx
+            y0 = yc - f * dy
 
-                x1 = xc + f * dx
-                y1 = yc + f * dy
+            x1 = xc + f * dx
+            y1 = yc + f * dy
 
-                print("*******************************", npix, f, dx, dy)
-                print(i, xc, yc)
-                print(i, x0,y0,x1,y1)
+            x_cut, y_cut, z_cut = self.cube.make_cut(x0,y0,x1,y1, z = self.rotated_images[iscale,iv-self.iv_min,:,:], num=npix)
 
-                x_cut, y_cut, z_cut = self.cube.make_cut(x0,y0,x1,y1, z = self.rotated_images[iscale,iv-self.iv_min,:,:], num=npix)
+            imax = np.argmax(z_cut)
 
-                imax = np.argmax(z_cut)
-                print("x", xc, x_cut[imax])
-                print("y", yc, y_cut[imax])
+            x_new[i] = x_cut[imax]
+            y_new[i] = y_cut[imax]
 
-
-                x_new[i] = x_cut[imax]
-                y_new[i] = y_cut[imax]
-
-        x = x_new
-        y = y_new
-
+        # reinterpolating new extracted surface on regular x
+        f = interp1d(x_new,y_new,fill_value="extrapolate")
+        y = f(x)
 
         self.x_sky[iscale,iv,:n] = x
         self.y_sky[iscale,iv,:n,0] = y
