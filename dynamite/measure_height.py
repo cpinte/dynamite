@@ -1,10 +1,14 @@
-# todo :
+# todo : iteractive procedure to fit proper maxima (not maxima along x)
 # - after 1extraction, fit surface with GP
-# - get isovelocity curve
+# - get isovelocity curve (could also try without by taking points before and after)
 # - find maxima along the perpendicular of the isovelocity curve
 # - iterate
 # - after some iterations, ignore points that are far from the isovelocity curve
 
+
+#todo : cleaning extraction
+# - ignore after a jump in x > 1 ??
+# - ignore after a jump in y > beam ?
 
 import astropy.constants as ac
 import matplotlib.pyplot as plt
@@ -519,6 +523,8 @@ class Surface:
 
 
     def _extract_isovelocity_1channel(self,iv,iscale=0):
+        # Find the maxima along y as in Pinte at al. 2018
+
 
         clean_method1 = True # removing points where the upper surface or average surface is below star at a given x
         clean_method2 = True # removing points that deviate a lot as a function of x
@@ -660,6 +666,69 @@ class Surface:
 
         return
 
+    def _refine_isovelocity_1channel(self,iv,iscale=0):
+        # Find iteratively the maxima along the perpendicular to the isovelocity curve
+        # then remap on the initial regular x_spacing so we can compute the altitude
+
+        # First we only keep points with no jump in x
+
+        n = self.n_surf[iscale,iv]
+        x = self.x_sky[iscale,iv,:n]
+        y = self.y_sky[iscale,iv,:n,0] # 1 surface for now
+
+        nbeams = 1. # cut along 1 beam ??
+        f =  nbeams*self.multiscale_bmaj[iscale] / self.cube.pixelscale
+        npix = int(np.floor(f)) # number of "pixels" along cut
+
+        print(x)
+
+        x_new = np.zeros(n)
+        y_new = np.zeros(n)
+
+        for i in range(n-1):
+            if i>0:
+                xc = x[i]
+                yc = y[i]
+
+                dy = x[i+1]-x[i-1]
+                dx = y[i+1]-y[i-1]
+
+                norm = np.sqrt(dx**2 + dy**2)
+                dy /= norm
+                dx /= norm
+
+                # We flip sign of cut if dx is <0
+                if dx<0:
+                    dx=-dx
+                    dy=-dy
+
+                x0 = xc - f * dx
+                y0 = yc - f * dy
+
+                x1 = xc + f * dx
+                y1 = yc + f * dy
+
+                print("*******************************", npix, f, dx, dy)
+                print(i, xc, yc)
+                print(i, x0,y0,x1,y1)
+
+                x_cut, y_cut, z_cut = self.cube.make_cut(x0,y0,x1,y1, z = self.rotated_images[iscale,iv-self.iv_min,:,:], num=npix)
+
+                imax = np.argmax(z_cut)
+                print("x", xc, x_cut[imax])
+                print("y", yc, y_cut[imax])
+
+
+                x_new[i] = x_cut[imax]
+                y_new[i] = y_cut[imax]
+
+        x = x_new
+        y = y_new
+
+
+        self.x_sky[iscale,iv,:n] = x
+        self.y_sky[iscale,iv,:n,0] = y
+
 
     def _compute_surface(self):
         """
@@ -687,7 +756,7 @@ class Surface:
         y_c = 0.5 * (y_f + y_n)
         #y_c = np.ma.masked_array(y_c,mask).compressed()
 
-        x = self.x_sky - self.x_star_rot
+        x = self.x_sky[:,:,:] - self.x_star_rot
 
         # inclination plays a role from here
         y = (y_f - y_c) / np.cos(inc_rad)
@@ -1038,6 +1107,36 @@ class Surface:
             #ax.set_ylim(np.min(y[iv,:n_surf[iv],:]) - 10*cube.bmaj/cube.pixelscale,np.max(y[iv,:n_surf[iv],:]) + 10*cube.bmaj/cube.pixelscale)
 
         ax.plot(self.x_star_rot,self.y_star_rot,"*",color="yellow",ms=3)
+
+
+    def plot_channel_multiscale(self, iv, radius=3.0, ax=None, clear=True):
+        # plot 1 channel and all the multiscale extraction
+
+        if ax is None:
+            ax = plt.gca()
+
+        if clear:
+            ax.cla()
+
+        cube = self.cube
+        x = self.x_sky
+        y = self.y_sky
+        n_surf = self.n_surf
+
+        iscale=0
+        im = np.nan_to_num(self.rotated_images[iscale,iv-self.iv_min,:,:])
+        # Array is rotated already
+        #if self.PA is not None:
+        #    im = np.array(rotate(im, self.PA - self.inc_sign * 90.0, reshape=False))
+
+        ax.imshow(im, origin="lower", cmap='binary_r')
+        ax.set_title(r'$\Delta$v='+"{:.2f}".format(cube.velocity[iv] - self.v_syst)+' , id:'+str(iv), color='k')
+
+        for iscale in range(self.n_scales):
+            ax.plot(x[iscale,iv,:n_surf[iscale,iv]],y[iscale,iv,:n_surf[iscale,iv],0],"o",color="red",markersize=1)
+            ax.plot(x[iscale,iv,:n_surf[iscale,iv]],y[iscale,iv,:n_surf[iscale,iv],1],"o",color="blue",markersize=1)
+            ax.plot(x[iscale,iv,:n_surf[iscale,iv]],np.mean(y[iscale,iv,:n_surf[iscale,iv],:],axis=1),"o",color="white",markersize=1)
+
 
     def plot_channels(self,n=20, num=21, radius=1.0, iv_min=None, iv_max=None, save=False, iscale=0):
 
