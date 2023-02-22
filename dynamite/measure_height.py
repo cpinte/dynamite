@@ -952,7 +952,7 @@ class Surface:
         h = self.h[scales,:,:]
         v = self.v[scales,:,:]
         dv = np.abs(self.dv[scales,:,:])
-        T = np.mean(self.Tb[scales,:,:,:],axis=4)
+        T = np.mean(self.Tb[scales,:,:,:],axis=-1)
 
         r_data = r.ravel().compressed()#[np.invert(mask.ravel())]
         h_data = h.ravel().compressed()#[np.invert(mask.ravel())]
@@ -1129,6 +1129,43 @@ class Surface:
             ax.plot(x[iscale,iv,:n_surf[iscale,iv]],y[iscale,iv,:n_surf[iscale,iv],0],"o",color="red",markersize=1)
             ax.plot(x[iscale,iv,:n_surf[iscale,iv]],y[iscale,iv,:n_surf[iscale,iv],1],"o",color="blue",markersize=1)
             ax.plot(x[iscale,iv,:n_surf[iscale,iv]],np.mean(y[iscale,iv,:n_surf[iscale,iv],:],axis=1),"o",color="white",markersize=1)
+
+
+    def plot_channel_multiscales(self, iv, radius=3.0, clear=True, num=21):
+        # plot 1 channel and all the multiscale extraction on multiple panels
+
+        ncols = int(np.ceil((self.n_scales+1)/2))
+        fig, axs = plt.subplots(ncols=ncols, nrows=2, figsize=(2*ncols+1, 5),constrained_layout=True,num=num,
+                                clear=False, sharex=True, sharey=True)
+        cube = self.cube
+        x = self.x_sky
+        y = self.y_sky
+        n_surf = self.n_surf
+
+        iscale=0
+        im = np.nan_to_num(self.rotated_images[iscale,iv-self.iv_min,:,:])
+        # Array is rotated already
+        #if self.PA is not None:
+        #    im = np.array(rotate(im, self.PA - self.inc_sign * 90.0, reshape=False))
+
+        ax0 = axs.ravel()[0]
+        ax0.imshow(im, origin="lower", cmap='binary_r')
+        ax0.set_title(r'$\Delta$v='+"{:.2f}".format(cube.velocity[iv] - self.v_syst)+' , id:'+str(iv), color='k')
+
+        for iscale in range(self.n_scales):
+            ax = axs.ravel()[iscale+1]
+
+            im = np.nan_to_num(self.rotated_images[iscale,iv-self.iv_min,:,:])
+            ax.imshow(im, origin="lower", cmap='binary_r')
+
+            ax.plot(x[iscale,iv,:n_surf[iscale,iv]],y[iscale,iv,:n_surf[iscale,iv],0],"o",color="red",markersize=1)
+            ax.plot(x[iscale,iv,:n_surf[iscale,iv]],y[iscale,iv,:n_surf[iscale,iv],1],"o",color="blue",markersize=1)
+            ax.plot(x[iscale,iv,:n_surf[iscale,iv]],np.mean(y[iscale,iv,:n_surf[iscale,iv],:],axis=1),"o",color="white",markersize=1)
+
+            ax0.plot(x[iscale,iv,:n_surf[iscale,iv]],y[iscale,iv,:n_surf[iscale,iv],0],"o",color="red",markersize=1)
+            ax0.plot(x[iscale,iv,:n_surf[iscale,iv]],y[iscale,iv,:n_surf[iscale,iv],1],"o",color="blue",markersize=1)
+            ax0.plot(x[iscale,iv,:n_surf[iscale,iv]],np.mean(y[iscale,iv,:n_surf[iscale,iv],:],axis=1),"o",color="white",markersize=1)
+
 
 
     def plot_channels(self,n=20, num=21, radius=1.0, iv_min=None, iv_max=None, save=False, iscale=0):
