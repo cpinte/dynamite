@@ -26,6 +26,8 @@ from scipy.stats import binned_statistic
 from astropy.convolution import Gaussian2DKernel, convolve, convolve_fft
 import celerite
 from celerite import terms
+from scipy import signal
+
 
 import casa_cube
 
@@ -52,6 +54,7 @@ class Surface:
                  std: float = None,
                  min_iv: int = None,
                  max_iv: int = None,
+                 scales = None,
                  **kwargs):
         """
         Parameters
@@ -144,8 +147,15 @@ class Surface:
         # This is where the actual work happens
         self._rotate_cube()
 
-        self._select_scales(num=num)
+        if scales is None:
+            self._select_scales(num=num)
+        else:
+            self.scales = scales
+            self.n_scales = len([scales])
+        print("Using ", self.n_scales, " scales")
+        print("Scales are ", self.scales, " arcsec")
 
+        self._create_rotated_cube()
         self._make_multiscale_cube()
 
         self._extract_isovelocity()
@@ -420,8 +430,9 @@ class Surface:
         self.n_scales = n_scales
         self.scales = self.cube.bmin * f**(np.arange(n_scales))
 
-        print("Using ", n_scales, " scales")
-        print("Scales are ", self.scales, " arcsec")
+        return
+
+    def _create_rotated_cube(self):
 
         self.rotated_images = np.zeros((self.n_scales,self.iv_max-self.iv_min+1,self.cube.ny,self.cube.nx), dtype=np.float32)
         self.rotated_images[0,:,:,:] = self.cube.image[self.iv_min:self.iv_max+1,:,:]
@@ -676,21 +687,24 @@ class Surface:
 
         n = self.n_surf[iscale,iv]
         x = self.x_sky[iscale,iv,:n]
-        y = self.y_sky[iscale,iv,:n,0] # 1 surface for now
+        y = self.y_sky[iscale,iv,:n,1] # 1 surface for now
 
-        nbeams = 1. # cut along 1 beam ??
+        nbeams = 2. # cut along 1 beam ??
         f =  nbeams*self.multiscale_bmaj[iscale] / self.cube.pixelscale
         npix = int(np.floor(f)) # number of "pixels" along cut
 
         x_new = np.zeros(n)
         y_new = np.zeros(n)
 
+        # We smooth a bit the previous extraction to avoid too much randomess in the cut direction
+        y = signal.savgol_filter(y, window_length=5, polyorder=3, mode="nearest")
+
         for i in range(n):
             xc = x[i]
             yc = y[i]
 
             j = np.maximum(np.minimum(i,n-2),1) # dealing with ends
-            dy = x[j+1]-x[j-1]
+            dy = -(x[j+1]-x[j-1])
             dx = y[j+1]-y[j-1]
 
             norm = np.sqrt(dx**2 + dy**2)
@@ -708,6 +722,17 @@ class Surface:
             x1 = xc + f * dx
             y1 = yc + f * dy
 
+            if (i==30):
+                print("----------------")
+                print("xc=", xc, i, j)
+                print("x=",  x[j+1], x[j-1])
+                print("y=",  y[j+1], y[j-1])
+
+                print("cut vector dxy=",dx,dy)
+
+                print(x0, y0)
+                print(x1,y1)
+
             x_cut, y_cut, z_cut = self.cube.make_cut(x0,y0,x1,y1, z = self.rotated_images[iscale,iv-self.iv_min,:,:], num=npix)
 
             imax = np.argmax(z_cut)
@@ -715,12 +740,15 @@ class Surface:
             x_new[i] = x_cut[imax]
             y_new[i] = y_cut[imax]
 
+            if (i==30):
+                print("new=", x_new[i], y_new[i])
+
         # reinterpolating new extracted surface on regular x
         f = interp1d(x_new,y_new,fill_value="extrapolate")
         y = f(x)
 
         self.x_sky[iscale,iv,:n] = x
-        self.y_sky[iscale,iv,:n,0] = y
+        self.y_sky[iscale,iv,:n,1] = y
 
 
     def _compute_surface(self):
