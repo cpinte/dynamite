@@ -54,7 +54,9 @@ class Surface:
                  std: float = None,
                  min_iv: int = None,
                  max_iv: int = None,
+                 no_scales: bool = False,
                  scales = None,
+                 only_guess: bool = False,
                  **kwargs):
         """
         Parameters
@@ -103,7 +105,7 @@ class Surface:
         """
 
         if isinstance(cube,str):
-            print("Reading cube ...")
+            print("Reading cube: "+cube)
             cube = casa_cube.Cube(cube)
 
         # Truncating the cube is velocity if needed
@@ -123,6 +125,9 @@ class Surface:
         self.sigma = sigma
 
         self._initial_guess(num=num,std=std)
+        if (only_guess):
+            print("Exiting: only performing initial guess ")
+            return
 
         self.exclude_inner_beam = exclude_inner_beam
 
@@ -235,49 +240,66 @@ class Surface:
         # We have at least 0.5km/s between peaks
         dx = np.maximum(4,int(0.25/dv))
 
-        iv_peaks = search_maxima(profile, height=10*profile_rms, dx=dx, prominence=0.2*np.max(profile))
+        iv_peaks = search_maxima(profile, height=10*profile_rms, dx=dx, prominence=0.05*np.max(profile))
 
         plt.figure(num+1)
         plt.clf()
         self.cube.plot_line(threshold=3*std)
 
-        if (iv_peaks.size < 2):
-            print("Could not find double peaked line profile")
         if (iv_peaks.size > 2):
             print("*** WARNING: Found more than 2 peaks in the line profile : please double check estimated values")
         #plt.plot(self.cube.velocity[iv_peaks], profile[iv_peaks], "o")
+        if (iv_peaks.size < 2):
+            print("Could not find double peaked line profile, fitting a single peak")
+            print("Brightest channel is :", iv_peaks[0])
+            print("Velocity of brightest channels:", self.cube.velocity[iv_peaks[0]], "km/s")
 
-        # We take the 2 brightest peaks, and we sort them in velocity
-        iv_peaks = iv_peaks[:2]
-        iv_peaks = iv_peaks[np.argsort(self.cube.velocity[iv_peaks])]
-        self.iv_peaks = iv_peaks
+            # Refine peak position by fitting a Gaussian
+            x = self.cube.velocity[iv_min:iv_max]
+            y = profile[iv_min:iv_max]
 
-        print("Brightest channels are :", iv_peaks[:2])
-        print("Velocity of brightest channels:", self.cube.velocity[iv_peaks[:2]], "km/s")
-
-        # Refine peak position by fitting a Gaussian
-        div = np.ceil(0.25 * (iv_peaks[1]-iv_peaks[0])).astype(int)
-        v_peaks=np.zeros(2)
-        for i in range(2):
-            x = self.cube.velocity[iv_peaks[i]-div:iv_peaks[i]+div+1]
-            y = profile[iv_peaks[i]-div:iv_peaks[i]+div+1]
-
-            p0 = [0.5*np.max(y), 0.5*np.max(y), self.cube.velocity[iv_peaks[i]], np.minimum(self.cube.velocity[iv_peaks[1]] - self.cube.velocity[iv_peaks[0]],0.2)]
+            p0 = [0.5*np.max(y), 0.5*np.max(y), self.cube.velocity[iv_peaks[0]], np.minimum(self.cube.velocity[iv_max] - self.cube.velocity[iv_min],0.2)]
             #plt.plot(x,Gaussian_p_cst(x,p0[0],p0[1],p0[2],p0[3]), color="red")
 
             p, _ = curve_fit(Gaussian_p_cst,x,y,sigma=1/np.sqrt(y), p0=p0)
-            v_peaks[i] = p[2]
+            v_peaks = p[2]
 
             x2=np.linspace(np.min(x),np.max(x),100)
             plt.plot(x2,Gaussian_p_cst(x2,p[0],p[1],p[2],p[3]), color="C3", linestyle="--", lw=1)
+            print("Velocity of peaks:", v_peaks, "km/s")
+
+            self.delta_v_peaks = 0.0
+        else:
+            # We take the 2 brightest peaks, and we sort them in velocity
+            iv_peaks = iv_peaks[:2]
+            iv_peaks = iv_peaks[np.argsort(self.cube.velocity[iv_peaks])]
+            print("Brightest channels are :", iv_peaks[:2])
+            print("Velocity of brightest channels:", self.cube.velocity[iv_peaks[:2]], "km/s")
+
+            # Refine peak position by fitting a Gaussian
+            div = np.ceil(0.25 * (iv_peaks[1]-iv_peaks[0])).astype(int)
+            v_peaks=np.zeros(2)
+            for i in range(2):
+                x = self.cube.velocity[iv_peaks[i]-div:iv_peaks[i]+div+1]
+                y = profile[iv_peaks[i]-div:iv_peaks[i]+div+1]
+
+                p0 = [0.5*np.max(y), 0.5*np.max(y), self.cube.velocity[iv_peaks[i]], np.minimum(self.cube.velocity[iv_peaks[1]] - self.cube.velocity[iv_peaks[0]],0.2)]
+                #plt.plot(x,Gaussian_p_cst(x,p0[0],p0[1],p0[2],p0[3]), color="red")
+
+                p, _ = curve_fit(Gaussian_p_cst,x,y,sigma=1/np.sqrt(y), p0=p0)
+                v_peaks[i] = p[2]
+
+                x2=np.linspace(np.min(x),np.max(x),100)
+                plt.plot(x2,Gaussian_p_cst(x2,p[0],p[1],p[2],p[3]), color="C3", linestyle="--", lw=1)
+
+                self.delta_v_peaks = v_peaks[1] - v_peaks[0]
+                print("Velocity of peaks:", v_peaks, "km/s")
 
         plt.xlabel("Velocity (km/s)")
         plt.ylabel("Flux density (Jy/beam)")
 
+        self.iv_peaks = iv_peaks
         self.v_peaks = v_peaks
-        self.delta_v_peaks = v_peaks[1] - v_peaks[0]
-
-        print("Velocity of peaks:", v_peaks, "km/s")
 
         self.v_syst = np.mean(self.v_peaks)
         print("Estimated systemic velocity =", self.v_syst, "km/s")
@@ -287,11 +309,14 @@ class Surface:
         self.excluded_delta_v = np.maximum(0.25 * self.delta_v_peaks, 0.1)
         print("Excluding channels within ", self.excluded_delta_v, "km/s of systemic velocity" )
 
+        iv_syst = np.argmin(np.abs(self.cube.velocity - self.v_syst))
+        self.iv_syst = iv_syst
+        print("Closest channel to systemic is", iv_syst)
+        print("Offset from systemic is", self.cube.velocity[iv_syst] - self.v_syst,"km/s")
+
         #---------------------------------
         # 3. Estimated stellar position
         #---------------------------------
-        iv_syst = np.argmin(np.abs(self.cube.velocity - self.v_syst))
-
         # We want at least 15 sigma to detect the star
         iv_min = nv
         iv_max = 0
@@ -325,6 +350,10 @@ class Surface:
         print("Finding star. Using channels", iv1, iv2)
         print("Estimated position of star:", x_star, y_star, "(pixels)")
 
+        self.dRA = ((self.cube.nx-1)/2 - x_star) * self.cube.pixelscale
+        self.dDec = (y_star - (self.cube.ny-1)/2) * self.cube.pixelscale
+        print(f'dRA={self.dRA:<5.3f}" dDec={self.dDec:<5.3f}"')
+
         color=["C0","C3"] # ie blue and red
         if (plt.fignum_exists(num+2)):
             plt.figure(num+2)
@@ -343,7 +372,16 @@ class Surface:
         # Measure centroid in 2 brightest channels
         x = np.zeros(2)
         y = np.zeros(2)
-        for i, iv in enumerate(iv_peaks):
+        if len(iv_peaks) == 2:
+            iv_channels = iv_peaks
+        else:
+            # if we have a single peak line profile, we use the channels half-way
+            dv = (np.minimum(iv_syst-iv_min, iv_max-iv_syst) - 1)//2
+            iv_channels = [int(iv_syst-dv),int(iv_syst+dv)]
+
+            print("test", iv_channels)
+
+        for i, iv in enumerate(iv_channels):
             im = image[iv,:,:]
             im = np.where(im > 3*std, im, 0)
             c = ndimage.center_of_mass(im)
@@ -360,7 +398,7 @@ class Surface:
         fig3, axes3 = plt.subplots(nrows=1,ncols=2,num=num+3,figsize=(12,5),sharex=True,sharey=True)
         for i in range(2):
             ax = axes3[i]
-            self.cube.plot(iv=iv_peaks[i],ax=ax,axes_unit="pixel")
+            self.cube.plot(iv=iv_channels[i],ax=ax,axes_unit="pixel")
             ax.plot(x[i],y[i],"o",color=color[i],ms=4)
             ax.plot(x[i],y[i],"o",color="white",ms=2)
 
