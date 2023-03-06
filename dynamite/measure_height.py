@@ -54,7 +54,7 @@ class Surface:
                  std: float = None,
                  min_iv: int = None,
                  max_iv: int = None,
-                 n_scales: int = None,
+                 no_scales: bool = False,
                  scales = None,
                  only_guess: bool = False,
                  **kwargs):
@@ -1384,7 +1384,7 @@ class Surface:
 
         r = np.array(self.r.ravel().compressed())
         h = self.h.ravel().compressed()
-        error = 1/(np.mean(self.snr[:,:,:],axis=2).ravel()[np.invert(self.r.mask.ravel())])
+        error = 1/(np.mean(self.snr[:,:,:,:],axis=-1).ravel()[np.invert(self.r.mask.ravel())])
 
         if tapered_power_law:
 
