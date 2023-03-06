@@ -54,7 +54,7 @@ class Surface:
                  std: float = None,
                  min_iv: int = None,
                  max_iv: int = None,
-                 no_scales: bool = False,
+                 n_scales: int = None,
                  scales = None,
                  only_guess: bool = False,
                  **kwargs):
@@ -72,9 +72,9 @@ class Surface:
         dDec
             Offset from center in Dec [arcsec]
         x_star
-            Star position [pixels], set as nx/2 for the center. If None, it is calculated
+            Star position [pixels], with (nx-1)/2 as the center. If None, it is calculated
         y_star
-            Star position [pixels], set as nx/2 for the center. If None, it is calculated
+            Star position [pixels], with (nx-1)/2 as the center. If None, it is calculated
         v_syst
             System velocity [km/s]. If None, it is calculated
         sigma
@@ -146,17 +146,22 @@ class Surface:
 
         if dRA is not None:
             print("Forcing star offset to: ", dRA, dDec, "(arcsec)")
-            self.x_star = (cube.nx/2 +1) + (dRA*np.pi/(180 * 3600))/np.abs(cube.header['CDELT1']*np.pi/180)
-            self.y_star = (cube.ny/2 +1) + (dDec*np.pi/(180 * 3600))/np.abs(cube.header['CDELT2']*np.pi/180)
+            self.x_star = (self.cube.nx-1)/2 +  dRA/self.cube.pixelscale
+            self.y_star = (self.cube.ny-1)/2 + dDec/self.cube.pixelscale
+
 
         # This is where the actual work happens
         self._rotate_cube()
 
-        if scales is None:
-            self._select_scales(num=num)
+        if no_scales:
+            self.n_scales=1
+            self.scales = cube.bmin
         else:
-            self.scales = scales
-            self.n_scales = len([scales])
+            if scales is None:
+                self._select_scales(num=num)
+            else:
+                self.scales = scales
+                self.n_scales = len([scales])
         print("Using ", self.n_scales, " scales")
         print("Scales are ", self.scales, " arcsec")
 
@@ -1267,6 +1272,7 @@ class Surface:
         initial_guess: float = 1.0,
         dist: float = None,
         h_func: ndarray = None,
+        scales = None
         ):
         """
         Parameters
@@ -1310,7 +1316,7 @@ class Surface:
 
         return
 
-    def _ln_like(self, theta, dist, h_func = None):
+    def _ln_like(self, theta, dist, h_func = None, scales=None):
         """Compute the ln like.
         """
 
@@ -1323,10 +1329,10 @@ class Surface:
         else:
             v_model = self._keplerian_disc(m_star, dist, h_func=h_func)
 
-        v = self.v.ravel().compressed()
+        v = self.v[scales,:,:].ravel().compressed()
 
         #using 1/snr as the error on the velocity
-        v_error = 1/(np.mean(self.snr[:,:,:],axis=2).ravel()[np.invert(self.r.mask.ravel())])
+        v_error = 1/(np.mean(self.snr[scales,:,:,:],axis=2).ravel()[np.invert(self.r[scales,:,:].mask.ravel())])
 
         # chi2
         chi2 = np.sum(((v - v_model)**2 / v_error**2) + np.log(2*np.pi*v_error**2))
