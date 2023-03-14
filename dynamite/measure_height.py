@@ -282,11 +282,11 @@ class Surface:
             print("Velocity of brightest channels:", self.cube.velocity[iv_peaks[:2]], "km/s")
 
             # Refine peak position by fitting a Gaussian
-            div = np.ceil(0.25 * (iv_peaks[1]-iv_peaks[0])).astype(int)
+            d_iv = np.ceil(0.25 * (iv_peaks[1]-iv_peaks[0])).astype(int)
             v_peaks=np.zeros(2)
             for i in range(2):
-                x = self.cube.velocity[iv_peaks[i]-div:iv_peaks[i]+div+1]
-                y = profile[iv_peaks[i]-div:iv_peaks[i]+div+1]
+                x = self.cube.velocity[iv_peaks[i]-d_iv:iv_peaks[i]+d_iv+1]
+                y = profile[iv_peaks[i]-d_iv:iv_peaks[i]+d_iv+1]
 
                 p0 = [0.5*np.max(y), 0.5*np.max(y), self.cube.velocity[iv_peaks[i]], np.minimum(self.cube.velocity[iv_peaks[1]] - self.cube.velocity[iv_peaks[0]],0.2)]
                 #plt.plot(x,Gaussian_p_cst(x,p0[0],p0[1],p0[2],p0[3]), color="red")
@@ -297,8 +297,8 @@ class Surface:
                 x2=np.linspace(np.min(x),np.max(x),100)
                 plt.plot(x2,Gaussian_p_cst(x2,p[0],p[1],p[2],p[3]), color="C3", linestyle="--", lw=1)
 
-                self.delta_v_peaks = v_peaks[1] - v_peaks[0]
-                print("Velocity of peaks:", v_peaks, "km/s")
+            self.delta_v_peaks = v_peaks[1] - v_peaks[0]
+            print("Velocity of peaks:", v_peaks, "km/s")
 
         plt.xlabel("Velocity (km/s)")
         plt.ylabel("Flux density (Jy/beam)")
@@ -307,17 +307,49 @@ class Surface:
         self.v_peaks = v_peaks
 
         self.v_syst = np.mean(self.v_peaks)
-        print("Estimated systemic velocity =", self.v_syst, "km/s")
+        print("Estimated systemic velocity (peaks) =", self.v_syst, "km/s")
 
-        plt.plot([self.v_syst,self.v_syst], [0.,1.05*np.max(profile)], lw=1, color="black", alpha=0.5)
+        plt.plot([self.v_syst,self.v_syst], [0.,1.05*np.max(profile)], lw=1, color="C3", alpha=0.7)
+
+        # Fitting v_syst from line wings
+        background = 0.5 * (profile[iv_min]+profile[iv_max])
+        delta_profile = np.max(profile) - background
+
+        ou = np.array(np.where(profile < background + 0.05 * delta_profile))
+        ou = ou[(ou > iv_min) * (ou < iv_max)]
+
+        x = self.cube.velocity[ou]
+        y = profile[ou]
+
+        p0 = [0, 2*p[1], self.v_syst, 0.5*(self.cube.velocity[iv_max] - self.cube.velocity[iv_min])]
+        #plt.plot(x,Gaussian_p_cst(x,p0[0],p0[1],p0[2],p0[3]), color="red")
+
+        p, _ = curve_fit(Gaussian_p_cst,x,y,sigma=1/np.sqrt(y), p0=p0)
+        v_syst_wings = p[2]
+        self.v_syst_wings = v_syst_wings
+        print("Estimated systemic velocity (wings) =", v_syst_wings, "km/s")
+
+        ou1 = ou[x < v_syst_wings]
+        plt.plot(self.cube.velocity[ou1], profile[ou1], color="green")
+        ou2 = ou[x > v_syst_wings]
+        plt.plot(self.cube.velocity[ou2], profile[ou2], color="green")
+
+        x2=np.linspace(np.min(x),np.max(x),100)
+        plt.plot(x2,Gaussian_p_cst(x2,p[0],p[1],p[2],p[3]), color="green", linestyle="--", lw=1)
+
+        plt.plot([v_syst_wings,v_syst_wings], [0.,1.05*np.max(profile)], lw=1, color="green", alpha=0.7)
+        #----
 
         self.excluded_delta_v = np.maximum(0.25 * self.delta_v_peaks, 0.1)
         print("Excluding channels within ", self.excluded_delta_v, "km/s of systemic velocity" )
 
         iv_syst = np.argmin(np.abs(self.cube.velocity - self.v_syst))
         self.iv_syst = iv_syst
+        iv_syst_wings = np.argmin(np.abs(self.cube.velocity - self.v_syst_wings))
+        self.iv_syst_wings = iv_syst_wings
         print("Closest channel to systemic is", iv_syst)
-        print("Offset from systemic is", self.cube.velocity[iv_syst] - self.v_syst,"km/s")
+        print("Offset from systemic is", self.cube.velocity[iv_syst] - self.v_syst,"km/s ==",
+              np.abs((self.cube.velocity[iv_syst] - self.v_syst)/(self.cube.velocity[1]-self.cube.velocity[0])), "channel width")
 
         #---------------------------------
         # 3. Estimated stellar position
@@ -330,10 +362,10 @@ class Surface:
                 iv_min = np.minimum(iv_min,i)
                 iv_max = np.maximum(iv_max,i)
 
-        dv = np.minimum(iv_syst-iv_min, iv_max-iv_syst) - 1
+        dv = np.minimum(iv_syst_wings-iv_min, iv_max-iv_syst_wings) - 1
 
-        iv1 = int(iv_syst-dv)
-        iv2 = int(iv_syst+dv)
+        iv1 = int(iv_syst_wings-dv)
+        iv2 = int(iv_syst_wings+dv)
 
         plt.figure(num+1)
         plt.plot(self.cube.velocity[[iv1,iv2]], profile[[iv1,iv2]], "o")
