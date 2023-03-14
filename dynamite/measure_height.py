@@ -380,6 +380,10 @@ class Surface:
             x[i] = c[1]
             y[i] = c[0]
 
+        PA_inner = np.rad2deg(np.arctan2(y[1]-y[0],x[1]-x[0])) - 90
+        self.PA_inner_disc = PA_inner
+        print("Estimated PA of red shifted side (inner disc) =", PA_inner, "deg")
+
         x_star = np.mean(x)
         y_star = np.mean(y)
         self.x_star = x_star
@@ -455,6 +459,7 @@ class Surface:
             self.inc_sign = 1
         else:
             self.inc_sign = -1
+
 
         return
 
