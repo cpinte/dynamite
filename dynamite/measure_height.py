@@ -150,8 +150,11 @@ class Surface:
             self.y_star = (self.cube.ny-1)/2 + dDec/self.cube.pixelscale
 
 
+
         # This is where the actual work happens
         self._rotate_cube()
+
+        self._get_disk_size(num=num)
 
         if no_scales:
             self.n_scales=1
@@ -448,6 +451,7 @@ class Surface:
         # Measure sign of inclination from average of 2 centroid, using a cross product with red shifted side
         # positive inclination means that the near side of the upper surface is at the bottom of the map when the
         # blue-shifted side is to the right
+        # this is the opposite convention in mcfost !!!!
         self.is_inc_positive = (np.mean(x)-x_star)*(y[1]-y_star) - (np.mean(y)-y_star)*(x[1]-x_star) > 0.
 
         if self.is_inc_positive:
@@ -480,12 +484,8 @@ class Surface:
 
         return
 
-
-    def _select_scales(self,num=0):
-        # Estimating the taper to use for the multi-scale analysis
-        #  2**n/2 * bmin up to a fraction of the disk size along semi-major axis
-
-        plt.figure(num+4)
+    def _get_disk_size(self,num=0):
+        plt.figure(num+7)
         plt.clf()
         self.cube.plot(moment=0, threshold=5*self.cube.std, iv_support=np.arange(self.iv_min,self.iv_max+1),axes_unit="pixel")
         M0 = self.cube.last_image
@@ -494,10 +494,22 @@ class Surface:
         # Find x index of pixels with signals
         ou = np.where(np.isfinite(np.nanmax(M0,axis=0)))
         disk_size = (np.max(ou) - np.min(ou))  * self.cube.pixelscale
+        self.disk_size = disk_size
 
-        print("Disk size is ", disk_size, " arcsec")
+        # Find y index of pixels with signals
+        ou = np.where(np.isfinite(np.nanmax(M0,axis=1)))
+        disk_size2 = (np.max(ou) - np.min(ou))  * self.cube.pixelscale
 
-        n_beams = disk_size/self.cube.bmin
+        print("Disk size is ", disk_size, "x", disk_size2, " arcsec")
+        print("Aspect ratio suggests inclination close to:", np.arccos(disk_size2/disk_size) * 180./np.pi), " deg"
+
+        return
+
+    def _select_scales(self,num=0):
+        # Estimating the taper to use for the multi-scale analysis
+        #  2**n/2 * bmin up to a fraction of the disk size along semi-major axis
+
+        n_beams = self.disk_size/self.cube.bmin
 
         print("There are ", n_beams, " beams accros the disk semi-major axis")
 
@@ -549,7 +561,8 @@ class Surface:
             for iv in range(self.iv_min,self.iv_max):
                 for iscale in range(self.n_scales):
                     self._extract_isovelocity_1channel(iv,iscale)
-                bar()
+                    #self._refine_isovelocity_1channel(iv,iscale=iscale)
+                    bar()
 
         #--  Additional spectral filtering to clean the data ??
 
