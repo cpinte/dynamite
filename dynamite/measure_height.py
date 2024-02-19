@@ -1454,6 +1454,66 @@ class Surface:
         return popt, copt
 
 
+    def to_mcfost(self, planet_r=0., planet_PA=0.):
+        # For a given planet projected separation and PA,
+        # this function gives the mcfost inclination, as well as the
+        # az to be passed to the planet_az option and the deprojected separation
+        #
+        # input:
+        # ------
+        # dynamite model + planet radius in arcsec or au, and planet PA in deg (in plane of sky, East from North)
+        #
+        # output:
+        # -------
+        # inclination in degrees to set in parameter file
+        # planet radius (eg to set in hydro simulations). It will be in same unit as planet_r
+        # planet_az in degrees (this is passed to mcfost via cmd line option)
+
+        # Note that pymcfost.get_planet_rPA does the opposite from a mcfost image
+
+        inc = self.inc * self.inc_sign
+
+        dPA = planet_PA - self.PA
+
+
+
+        #az = np.arctan(np.tan(np.deg2rad(dPA)) / np.cos(np.deg2rad(self.inc)))
+
+        y = np.sin(np.deg2rad(dPA)) / np.cos(np.deg2rad(inc))
+        x = np.cos(np.deg2rad(dPA))
+        az = np.arctan2(y,x)
+
+        az = - np.rad2deg(az) # conversion to deg and correct convention for mcfost
+
+        y_p = planet_r * np.sin(np.deg2rad(dPA))
+        x_p = planet_r * np.cos(np.deg2rad(dPA))
+
+        x = x_p
+        y = y_p / np.cos(np.deg2rad(inc))
+
+        r = np.hypot(x,y)
+
+        # test :
+        #mcfost.get_planet_r_az(62.5,50.2, 0.60521173 * 157.2, 11.619613647460938)
+        # should give : (130.00000395126042, 62.500002877567475)
+
+        # mcfost inclination is opposite to dynamite (which mattches discminer for convenience)
+        if (inc<0):
+            mcfost_inc=-inc
+        else: # to avoid the bug in red/blue PA with negative inclination in mcfost
+            mcfost_inc=180-inc
+            az = -az
+
+        print("MCFOST parameters should be:")
+        print("i=",mcfost_inc,"deg")
+        print("PA=",self.PA,"deg")
+        print("planet r=",r,"au")
+        print("planet az=",az,"deg (for cmd line option)")
+
+        return mcfost_inc, r, az
+
+
+
     def fit_surface_height_gp(self):
 
         x = np.array(self.r.ravel().compressed())
