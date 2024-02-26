@@ -125,9 +125,6 @@ class Surface:
         self.sigma = sigma
 
         self._initial_guess(num=num,std=std)
-        if (only_guess):
-            print("Exiting: only performing initial guess ")
-            return
 
         self.exclude_inner_beam = exclude_inner_beam
 
@@ -149,12 +146,12 @@ class Surface:
             self.x_star = (self.cube.nx-1)/2 +  dRA/self.cube.pixelscale
             self.y_star = (self.cube.ny-1)/2 + dDec/self.cube.pixelscale
 
-
+        if (only_guess):
+            print("Exiting: only performing initial guess ")
+            return
 
         # This is where the actual work happens
         self._rotate_cube()
-
-        self._get_disk_size(num=num)
 
         if no_scales:
             self.n_scales=1
@@ -175,7 +172,7 @@ class Surface:
 
         # Making plots
         if plot:
-            self.plot_channels(num=num+8)
+            self.plot_channels(num=num+9)
 
         if inc is not None:
             print("Forcing inclination to ", inc, " deg")
@@ -190,10 +187,20 @@ class Surface:
             self.dist = dist
             self.fit_central_mass(dist=dist)
             if plot:
-                self.plot_surfaces(num=num+9,m_star=self.m_star,dist=dist)
+                self.plot_surfaces(num=num+10,m_star=self.m_star,dist=dist)
         else:
             if plot:
-                self.plot_surfaces(num=num+9)
+                self.plot_surfaces(num=num+10)
+
+        return
+
+    def cutout(self):
+
+        new_file=self.cube.filename.replace(".fits","_cutout.fits")
+        iv_buffer = 3
+        FOV = self.image_size * 1.5
+
+        self.cube.cutout(new_file,FOV=FOV,overwrite=True,iv_min=self.iv_min-iv_buffer,iv_max=self.iv_max+iv_buffer)
 
         return
 
@@ -464,6 +471,10 @@ class Surface:
         else:
             self.inc_sign = -1
 
+        #---------------------------------
+        # 4. Estimated size of image
+        #---------------------------------
+        self._get_image_size(num=num)
 
         return
 
@@ -484,11 +495,36 @@ class Surface:
 
         return
 
-    def _get_disk_size(self,num=0):
+    def _get_image_size(self,num=0):
+        # get size of image with flux
         plt.figure(num+7)
         plt.clf()
         self.cube.plot(moment=0, threshold=5*self.cube.std, iv_support=np.arange(self.iv_min,self.iv_max+1),axes_unit="pixel")
         M0 = self.cube.last_image
+
+        # Find x index of pixels with signals
+        ou = np.where(np.isfinite(np.nanmax(M0,axis=0)))
+        disk_size = (np.max(ou) - np.min(ou))  * self.cube.pixelscale
+        self.disk_size = disk_size
+
+        # Find y index of pixels with signals
+        ou = np.where(np.isfinite(np.nanmax(M0,axis=1)))
+        disk_size2 = (np.max(ou) - np.min(ou))  * self.cube.pixelscale
+
+        self.image_size = np.maximum(disk_size,disk_size2)
+
+        print("Actual size of image (ie with flux) is ~", self.image_size, "arcsec")
+
+        return
+
+
+    def _get_disk_size(self,num=0):
+        plt.figure(num+8)
+        plt.clf()
+        self.cube.plot(moment=0, threshold=5*self.cube.std, iv_support=np.arange(self.iv_min,self.iv_max+1),axes_unit="pixel")
+        M0 = self.cube.last_image
+
+        # We have rotated the cube beforehand
         self.M0 = M0
 
         # Find x index of pixels with signals
@@ -502,6 +538,8 @@ class Surface:
 
         print("Disk size is ", disk_size, "x", disk_size2, " arcsec")
         print("Aspect ratio suggests inclination close to:", np.arccos(disk_size2/disk_size) * 180./np.pi), " deg"
+
+        self.disk_size = [disk_size,disk_size2]
 
         return
 
