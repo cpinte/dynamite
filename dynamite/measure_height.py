@@ -235,8 +235,9 @@ class Surface:
         nv = self.cube.nv
         iv_min = nv-1
         iv_max = 0
+        min_image = np.min(image,axis=0) # proxy for continuum if present
         for i in range(nv):
-            if np.max(image[i,:,:]) > 10*std:
+            if np.max(image[i,:,:] - min_image) > 10*std:
                 iv_min = np.minimum(iv_min,i)
                 iv_max = np.maximum(iv_max,i)
 
@@ -321,7 +322,9 @@ class Surface:
 
         plt.plot([self.v_syst,self.v_syst], [0.,1.05*np.max(profile)], lw=1, color="C3", alpha=0.7)
 
+        # --------------------------------
         # Fitting v_syst from line wings
+        # --------------------------------
         background = 0.5 * (profile[iv_min]+profile[iv_max])
         delta_profile = np.max(profile) - background
 
