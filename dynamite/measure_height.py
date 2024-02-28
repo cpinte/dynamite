@@ -52,8 +52,10 @@ class Surface:
                  num: int = 0,
                  plot: bool = True,
                  std: float = None,
-                 min_iv: int = None,
-                 max_iv: int = None,
+                 vmin: float = None,
+                 vmax: float = None,
+                 iv_min: int = None,
+                 iv_max: int = None,
                  no_scales: bool = False,
                  scales = None,
                  only_guess: bool = False,
@@ -109,14 +111,19 @@ class Surface:
             cube = casa_cube.Cube(cube)
 
         # Truncating the cube is velocity if needed
-        if min_iv is not None:
-            if max_iv is None:
-                raise ValueError("max_iv is required is min_iv is provided")
+        if vmin is not None:
+            iv_min = np.argmin(np.abs(cube.velocity - vmin))
+        if vmax is not None:
+            iv_max = np.argmin(np.abs(cube.velocity - vmax))
+
+        if iv_min is not None:
+            if iv_max is None:
+                raise ValueError("iv_max is required if iv_min is provided")
 
             print("Truncating cube in velocity")
-            cube.image = cube.image[min_iv:max_iv+1,:,:]
-            cube.velocity = cube.velocity[min_iv:max_iv+1]
-            cube.nv = max_iv-min_iv+1
+            cube.image = cube.image[iv_min:iv_max+1,:,:]
+            cube.velocity = cube.velocity[iv_min:iv_max+1]
+            cube.nv = iv_max-iv_min+1
 
         self.cube = cube
 
@@ -194,11 +201,17 @@ class Surface:
 
         return
 
-    def cutout(self):
+    def cutout(self,FOV=None):
 
         new_file=self.cube.filename.replace(".fits","_cutout.fits")
         iv_buffer = 3
-        FOV = self.image_size * 1.5
+
+        if FOV is None:
+            FOV = self.image_size * 1.25
+
+        print("Cutting out to a FOV of ", FOV, "arcsec")
+        print("Velocity channels between", self.iv_min-iv_buffer, "and", self.iv_max+iv_buffer)
+        print("ie, between", self.cube.velocity[self.iv_min-iv_buffer], "and", self.cube.velocity[self.iv_max+iv_buffer], "km/s")
 
         self.cube.cutout(new_file,FOV=FOV,overwrite=True,iv_min=self.iv_min-iv_buffer,iv_max=self.iv_max+iv_buffer)
 
@@ -502,7 +515,7 @@ class Surface:
         # get size of image with flux
         plt.figure(num+7)
         plt.clf()
-        self.cube.plot(moment=0, threshold=5*self.cube.std, iv_support=np.arange(self.iv_min,self.iv_max+1),axes_unit="pixel")
+        self.cube.plot(moment=0, threshold=3*self.cube.std, iv_support=np.arange(self.iv_min,self.iv_max+1),axes_unit="pixel")
         M0 = self.cube.last_image
 
         # Find x index of pixels with signals
