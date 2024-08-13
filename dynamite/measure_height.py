@@ -120,10 +120,25 @@ class Surface:
             if iv_max is None:
                 raise ValueError("iv_max is required if iv_min is provided")
 
+
+            # if the velocity axis is flipped
+            if iv_min > iv_max:
+                temp = iv_min
+                iv_min = iv_max
+                iv_max = temp
+
             print("Truncating cube in velocity")
             cube.image = cube.image[iv_min:iv_max+1,:,:]
             cube.velocity = cube.velocity[iv_min:iv_max+1]
             cube.nv = iv_max-iv_min+1
+
+            # Updating header
+            if cube.header['CRPIX3']-1 >= iv_min: # we keep the same pixel, and adjust its index
+                cube.header['CRPIX3'] -= iv_min
+            else: # we use the first pixel, and update its coordinates
+                cube.header['CRVAL3'] += (iv_min - (cube.header['CRPIX3']-1)) * cube.header['CDELT3']
+                cube.header['CRPIX3'] = 1
+                cube.header['NAXIS3'] = iv_max - iv_min
 
         self.cube = cube
 
@@ -214,6 +229,8 @@ class Surface:
         print("ie, between", self.cube.velocity[self.iv_min-iv_buffer], "and", self.cube.velocity[self.iv_max+iv_buffer], "km/s")
 
         self.cube.cutout(new_file,FOV=FOV,overwrite=True,iv_min=self.iv_min-iv_buffer,iv_max=self.iv_max+iv_buffer)
+
+        self.cutout_parameters = [FOV,self.iv_min-iv_buffer,self.iv_max+iv_buffer]
 
         return
 
@@ -390,8 +407,8 @@ class Surface:
 
         dv = np.minimum(iv_syst_wings-iv_min, iv_max-iv_syst_wings) - 1
 
-        iv1 = int(iv_syst_wings-dv)
-        iv2 = int(iv_syst_wings+dv)
+        iv1 = np.maximum(int(iv_syst_wings-dv),0)
+        iv2 = np.minimum(int(iv_syst_wings+dv),nv-1)
 
         plt.figure(num+1)
         plt.plot(self.cube.velocity[[iv1,iv2]], profile[[iv1,iv2]], "o")
