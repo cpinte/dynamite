@@ -1453,7 +1453,7 @@ class Surface:
         v = self.v[scales,:,:].ravel().compressed()
 
         #using 1/snr as the error on the velocity
-        v_error = 1/(np.mean(self.snr[scales,:,:,:],axis=2).ravel()[np.invert(self.r[scales,:,:].mask.ravel())])
+        v_error = 1/(np.mean(self.snr[scales,:,:,:],axis=-1).ravel()[np.invert(self.r[scales,:,:].mask.ravel())])
 
         # chi2
         chi2 = np.sum(((v - v_model)**2 / v_error**2) + np.log(2*np.pi*v_error**2))
