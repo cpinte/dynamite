@@ -168,6 +168,10 @@ class Surface:
             self.x_star = (self.cube.nx-1)/2 +  dRA/self.cube.pixelscale
             self.y_star = (self.cube.ny-1)/2 + dDec/self.cube.pixelscale
 
+        if inc is not None:
+            print("Forcing inclination to ", inc, " deg")
+            self.inc = inc
+
         if (only_guess):
             print("Exiting: only performing initial guess ")
             return
@@ -196,10 +200,7 @@ class Surface:
         if plot:
             self.plot_channels(num=num+9)
 
-        if inc is not None:
-            print("Forcing inclination to ", inc, " deg")
-            self.inc = inc
-        else:
+        if inc is None:
             print("Estimating inclination:")
             self.find_i(num)
 
@@ -405,12 +406,13 @@ class Surface:
                 iv_min = np.minimum(iv_min,i)
                 iv_max = np.maximum(iv_max,i)
 
-        dv = np.minimum(iv_syst_wings-iv_min, iv_max-iv_syst_wings) - 1
+        dv = np.abs(np.minimum(iv_syst_wings-iv_min, iv_max-iv_syst_wings) - 1)
 
         iv1 = np.maximum(int(iv_syst_wings-dv),0)
         iv2 = np.minimum(int(iv_syst_wings+dv),nv-1)
 
         plt.figure(num+1)
+        print(iv1, iv2 )
         plt.plot(self.cube.velocity[[iv1,iv2]], profile[[iv1,iv2]], "o")
         plt.xlim(self.cube.velocity[iv1]-0.5,self.cube.velocity[iv2]+0.5)
 
@@ -598,7 +600,7 @@ class Surface:
     def _create_rotated_cube(self):
 
         self.rotated_images = np.zeros((self.n_scales,self.iv_max-self.iv_min+1,self.cube.ny,self.cube.nx), dtype=np.float32)
-        self.rotated_images[0,:,:,:] = self.cube.image[self.iv_min:self.iv_max+1,:,:]
+        self.rotated_images[0,:,:,:] = self.cube.image[self.iv_min:self.iv_max+1,:,:] # scale 0
 
         return
 
@@ -1274,13 +1276,13 @@ class Surface:
         y = self.y_sky
         n_surf = self.n_surf
 
-        im = np.nan_to_num(self.rotated_images[iscale,iv-self.iv_min,:,:])
+        im = np.nan_to_num(self.rotated_images[iscale,iv-self.iv_min,:,:]) # array has been trimmed in velocity
         # Array is rotated already
         #if self.PA is not None:
         #    im = np.array(rotate(im, self.PA - self.inc_sign * 90.0, reshape=False))
 
         ax.imshow(im, origin="lower", cmap='binary_r')
-        ax.set_title(r'$\Delta$v='+"{:.2f}".format(cube.velocity[iv] - self.v_syst)+' , id:'+str(iv), color='k')
+        ax.set_title(r'v='+"{:.2f}".format(cube.velocity[iv])+' , $\Delta$v='+"{:.2f}".format(cube.velocity[iv] - self.v_syst)+' , id:'+str(iv), color='k')
 
         if n_surf[iscale,iv]:
             ax.plot(x[iscale,iv,:n_surf[iscale,iv]],y[iscale,iv,:n_surf[iscale,iv],0],"o",color="red",markersize=1)
@@ -1292,6 +1294,8 @@ class Surface:
             #ax.set_ylim(np.min(y[iv,:n_surf[iv],:]) - 10*cube.bmaj/cube.pixelscale,np.max(y[iv,:n_surf[iv],:]) + 10*cube.bmaj/cube.pixelscale)
 
         ax.plot(self.x_star_rot,self.y_star_rot,"*",color="yellow",ms=3)
+
+        return
 
 
     def plot_channel_multiscale(self, iv, radius=3.0, ax=None, clear=True):
@@ -1322,6 +1326,7 @@ class Surface:
             ax.plot(x[iscale,iv,:n_surf[iscale,iv]],y[iscale,iv,:n_surf[iscale,iv],1],"o",color="blue",markersize=1)
             ax.plot(x[iscale,iv,:n_surf[iscale,iv]],np.mean(y[iscale,iv,:n_surf[iscale,iv],:],axis=1),"o",color="white",markersize=1)
 
+        return
 
     def plot_channel_multiscales(self, iv, radius=3.0, clear=True, num=21):
         # plot 1 channel and all the multiscale extraction on multiple panels
@@ -1358,7 +1363,7 @@ class Surface:
             ax0.plot(x[iscale,iv,:n_surf[iscale,iv]],y[iscale,iv,:n_surf[iscale,iv],1],"o",color="blue",markersize=1)
             ax0.plot(x[iscale,iv,:n_surf[iscale,iv]],np.mean(y[iscale,iv,:n_surf[iscale,iv],:],axis=1),"o",color="white",markersize=1)
 
-
+        return
 
     def plot_channels(self,n=20, num=21, radius=1.0, iv_min=None, iv_max=None, save=False, iscale=0):
 
@@ -1380,7 +1385,9 @@ class Surface:
                                 clear=False)
 
         for i, ax in enumerate(axs.flatten()):
-            self.plot_channel(int(iv_min+i*dv), iscale=iscale, radius=radius, ax=ax)
+            iv = int(iv_min+i*dv)
+            print(i, iv)
+            self.plot_channel(iv, iscale=iscale, radius=radius, ax=ax)
 
         if save is not None and isinstance(save, str):
             plt.savefig(save, dpi=300, bbox_inches='tight', pad_inches=0.01, format='pdf')
@@ -1582,7 +1589,6 @@ class Surface:
         print("planet az=",az,"deg (for cmd line option)")
 
         return mcfost_inc, r, az
-
 
 
     def fit_surface_height_gp(self):
