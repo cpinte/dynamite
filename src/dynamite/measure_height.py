@@ -218,6 +218,26 @@ class Surface:
         return
 
     def cutout(self,FOV=None):
+        """Create a cutout of the data cube around the detected emission.
+
+        This method creates a new FITS file containing only the relevant velocity channels
+        and spatial region around the detected emission.
+
+        Parameters
+        ----------
+        FOV : float, optional
+            Field of view in arcseconds for the cutout. If None, uses 1.25 * image_size
+
+        Returns
+        -------
+        None
+            Creates a new FITS file with "_cutout" appended to the original filename
+
+        Notes
+        -----
+        - Adds a buffer of 3 velocity channels on each end
+        - The cutout parameters are stored in self.cutout_parameters
+        """
 
         new_file=self.cube.filename.replace(".fits","_cutout.fits")
         iv_buffer = 3
@@ -997,7 +1017,31 @@ class Surface:
         return
 
     def compute_v_std(self,nbins=30):
+        """Compute standard deviations of height, velocity and temperature in radial bins.
 
+        This method calculates the standard deviation of height, velocity and temperature
+        as a function of radius by binning the data.
+
+        Parameters
+        ----------
+        nbins : int, optional
+            Number of radial bins to use for computing standard deviations
+
+        Returns
+        -------
+        None
+            Stores the following attributes:
+            - h_std : float
+                Mean standard deviation of height across all bins
+            - v_std : float
+                Mean standard deviation of velocity across all bins
+            - T_std : float
+                Mean standard deviation of temperature across all bins
+
+        Notes
+        -----
+        Uses scipy.stats.binned_statistic to compute the standard deviations
+        """
         r = self.r.compressed()
         h = self.h.compressed()
         v = self.v.compressed()
@@ -1017,7 +1061,30 @@ class Surface:
         return
 
     def find_i(self,num=0):
+        """Find the optimal inclination angle by minimizing velocity dispersion.
 
+        This method performs a grid search over inclination angles to find the value
+        that minimizes the velocity dispersion in the deprojected data.
+
+        Parameters
+        ----------
+        num : int, optional
+            Figure number for plotting the results
+
+        Returns
+        -------
+        None
+            Stores the optimal inclination angle in self.inc
+
+        Notes
+        -----
+        - Performs an initial coarse search from 10-80 degrees
+        - Refines the search around the minimum with finer steps
+        - Creates three diagnostic plots:
+            1. Altitude dispersion vs inclination
+            2. Temperature dispersion vs inclination
+            3. Velocity dispersion vs inclination
+        """
         # Altitude dispersion
         plt.figure(num+5)
         plt.clf()
@@ -1264,6 +1331,39 @@ class Surface:
         return
 
     def plot_channel(self, iv, iscale=0, radius=3.0, ax=None, clear=True):
+        """Plot a single velocity channel with detected emission surfaces.
+
+        This method creates a visualization of a single velocity channel showing:
+        - The channel map
+        - Detected near and far surfaces
+        - Average surface
+        - Star position
+
+        Parameters
+        ----------
+        iv : int
+            Velocity channel number to plot
+        iscale : int, optional
+            Scale index to use for plotting (default: 0)
+        radius : float, optional
+            Radius in arcseconds for zooming (default: 3.0)
+        ax : matplotlib.axes.Axes, optional
+            Axes object to plot on. If None, uses current axes
+    clear : bool, optional
+        Whether to clear the axes before plotting
+
+        Returns
+        -------
+        None
+            Creates or updates a plot showing the channel map and detected surfaces
+
+        Notes
+        -----
+        - Red points show the near surface
+        - Blue points show the far surface
+        - White points show the average surface
+        - Yellow star shows the stellar position
+        """
 
         if ax is None:
             ax = plt.gca()
@@ -1299,7 +1399,37 @@ class Surface:
 
 
     def plot_channel_multiscale(self, iv, radius=3.0, ax=None, clear=True):
-        # plot 1 channel and all the multiscale extraction
+        """Plot a single velocity channel showing all multi-scale surface detections.
+
+        This method creates a visualization of a single velocity channel showing:
+        - The channel map
+        - Detected surfaces at all scales used in the analysis
+        - Star position
+
+        Parameters
+        ----------
+        iv : int
+            Velocity channel number to plot
+        radius : float, optional
+            Radius in arcseconds for zooming (default: 3.0)
+        ax : matplotlib.axes.Axes, optional
+            Axes object to plot on. If None, uses current axes
+    clear : bool, optional
+        Whether to clear the axes before plotting
+
+        Returns
+        -------
+        None
+            Creates or updates a plot showing the channel map and all scale surface detections
+
+        Notes
+        -----
+        - Shows surfaces detected at each scale used in the multi-scale analysis
+        - Red points show the near surface
+        - Blue points show the far surface
+        - White points show the average surface
+        - Yellow star shows the stellar position
+        """
 
         if ax is None:
             ax = plt.gca()
@@ -1366,6 +1496,40 @@ class Surface:
         return
 
     def plot_channels(self,n=20, num=21, radius=1.0, iv_min=None, iv_max=None, save=False, iscale=0):
+        """Create a grid of plots showing multiple velocity channels.
+
+        This method creates a grid of plots showing the emission and detected surfaces
+        for multiple velocity channels across the line profile.
+
+        Parameters
+        ----------
+        n : int, optional
+            Number of channels to plot (default: 20)
+        num : int, optional
+            Figure number for the plot (default: 21)
+        radius : float, optional
+            Radius in arcseconds for zooming (default: 1.0)
+        iv_min : int, optional
+            Minimum velocity channel to plot. If None, uses self.iv_min_surf
+        iv_max : int, optional
+            Maximum velocity channel to plot. If None, uses self.iv_max_surf
+        save : bool or str, optional
+            If True or string, saves the plot. If string, uses as filename
+        iscale : int, optional
+            Scale index to use for plotting (default: 0)
+
+        Returns
+        -------
+        None
+            Creates a grid of plots showing multiple velocity channels
+
+        Notes
+        -----
+        - Creates a 5-column grid of plots
+        - Each subplot shows one velocity channel with detected surfaces
+        - If save is True, saves as 'channels.pdf'
+        - If save is a string, saves with that filename
+        """
 
         if iv_min is None:
             iv_min=self.iv_min_surf
@@ -1533,22 +1697,34 @@ class Surface:
 
 
     def to_mcfost(self, planet_r=0., planet_PA=0.):
-        # For a given planet projected separation and PA,
-        # this function gives the mcfost inclination, as well as the
-        # az to be passed to the planet_az option and the deprojected separation
-        #
-        # input:
-        # ------
-        # dynamite model + planet radius in arcsec or au, and planet PA in deg (in plane of sky, East from North)
-        #
-        # output:
-        # -------
-        # inclination in degrees to set in parameter file
-        # planet radius (eg to set in hydro simulations). It will be in same unit as planet_r
-        # planet_az in degrees (this is passed to mcfost via cmd line option)
+        """Convert dynamite model parameters to MCFOST parameters.
 
-        # Note that pymcfost.get_planet_rPA does the opposite from a mcfost image
+        For a given planet projected separation and PA, this function calculates the
+        MCFOST inclination, planet azimuth angle, and deprojected separation.
 
+        Parameters
+        ----------
+        planet_r : float, optional
+            Planet radius in arcsec or au (default: 0.0)
+        planet_PA : float, optional
+            Planet position angle in degrees, measured in plane of sky East from North (default: 0.0)
+
+        Returns
+        -------
+        tuple
+            - mcfost_inc : float
+                Inclination in degrees to set in MCFOST parameter file
+            - r : float
+                Planet radius (e.g. to set in hydro simulations). Same unit as input planet_r
+            - az : float
+                Planet azimuth in degrees (to be passed to MCFOST via cmd line option)
+
+        Notes
+        -----
+        - MCFOST inclination is opposite to dynamite (which matches discminer for convenience)
+        - For negative inclinations, MCFOST uses 180-inc and negates the azimuth to avoid bugs
+        - The function pymcfost.get_planet_rPA does the opposite transformation from a MCFOST image
+        """
         inc = self.inc * self.inc_sign
 
         dPA = planet_PA - self.PA
@@ -1676,14 +1852,32 @@ def search_maxima_old(y, height=None, dx=0, prominence=0):
 
 
 def search_maxima(y, height=None, dx=0, prominence=0):
-    """
-    Returns the indices of the maxima of a function
-    Indices are sorted by decreasing values of the maxima
+    """Find and sort local maxima in a 1D array.
 
-    Args:
-         y : array where to search for maxima
-         threshold : minimum value of y for a maximum to be detected
-         dx : minimum spacing between maxima [in pixel]
+    This function finds local maxima in a 1D array and sorts them by decreasing height.
+    It uses scipy.signal.find_peaks to identify maxima with specified constraints.
+
+    Parameters
+    ----------
+    y : array_like
+        1D array where to search for maxima
+    height : float, optional
+        Minimum height required for a peak to be identified
+    dx : float, optional
+        Minimum spacing between maxima in pixels (default: 0)
+    prominence : float, optional
+        Required prominence of peaks (default: 0)
+
+    Returns
+    -------
+    ndarray
+        Indices of maxima, sorted by decreasing peak height
+
+    Notes
+    -----
+    - Uses scipy.signal.find_peaks for peak detection
+    - Peaks are sorted by height in descending order
+    - Minimum peak separation is enforced through the distance parameter
     """
 
      # find local maxima
@@ -1696,14 +1890,71 @@ def search_maxima(y, height=None, dx=0, prominence=0):
 
 
 def Gaussian_p_cst(x, C, A, x0, sigma):
-    """" Gaussian + constant function """
+    """Evaluate a Gaussian function plus a constant.
+
+    This function computes a Gaussian curve with a constant offset:
+    f(x) = C + A * exp(-(x - x0)^2 / (2 * sigma^2))
+
+    Parameters
+    ----------
+    x : array_like
+        Input x values
+    C : float
+        Constant offset
+    A : float
+        Amplitude of the Gaussian
+    x0 : float
+        Center of the Gaussian
+    sigma : float
+        Standard deviation of the Gaussian
+
+    Returns
+    -------
+    array_like
+        Computed function values at input x positions
+
+    Notes
+    -----
+    This function is typically used for fitting spectral line profiles
+    """
     return C + A * np.exp(-(x - x0) ** 2 / (2 * sigma ** 2))
 
 
 def colorbar2(mappable, shift=None, width=0.05, ax=None, trim_left=0, trim_right=0, side="right",**kwargs):
-    # creates a color bar that does not shrink the main plot or panel
-    # only works for horizontal bars so far
+    """Create a colorbar that does not shrink the main plot.
 
+    This function creates a colorbar for a plot or image that does not reduce the size
+    of the main plot panel, unlike matplotlib's default colorbar behavior.
+
+    Parameters
+    ----------
+    mappable : matplotlib.cm.ScalarMappable
+        The mappable object (plot/image) to create a colorbar for
+    shift : float, optional
+        Spacing between plot and colorbar in fraction of plot size
+    width : float, optional
+        Width of colorbar in fraction of plot size (default: 0.05)
+    ax : matplotlib.axes.Axes, optional
+        Axes object to attach colorbar to. If None, uses current axes
+    trim_left : float, optional
+        Amount to trim from left side of colorbar (default: 0)
+    trim_right : float, optional
+        Amount to trim from right side of colorbar (default: 0)
+    side : str, optional
+        Which side to place colorbar on - "right" or "top" (default: "right")
+    **kwargs
+        Additional keyword arguments passed to matplotlib.figure.Figure.colorbar()
+
+    Returns
+    -------
+    matplotlib.colorbar.Colorbar
+        The created colorbar object
+
+    Notes
+    -----
+    - Currently only supports horizontal ("top") and vertical ("right") colorbars
+    - Default shift is 0.2 for "top" and 0.05 for "right" placement
+    """
     if ax is None:
         ax = mappable.axes
 
