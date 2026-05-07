@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dynamite"
+version = "0.1.0"
+description = "DYNamical Analysis and MultIscale Tomography of line Emission"
+readme = "README.md"
+requires-python = ">=3.8"
+license = {text = "MIT"}
+authors = [
+    {name = "Christophe Pinte", email = "christophe.pinte@univ-grenoble-alpes.fr"}
+]
+keywords = ["astronomy", "protoplanetary-disks", "kinematics", "tomography", "ALMA"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "Topic :: Scientific/Engineering :: Physics",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
+dependencies = [
+    "numpy",
+    "astropy",
+    "scipy",
+    "matplotlib",
+    "tqdm",
+    "casa_cube",
+    "celerite2"
+]
+
+[project.urls]
+Homepage = "https://github.com/cpinte/dynamite"
+Repository = "https://github.com/cpinte/dynamite.git"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+packages = ["dynamite"]

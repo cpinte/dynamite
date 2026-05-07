@@ -14,22 +14,18 @@ import astropy.constants as ac
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.constants as sc
-from alive_progress import alive_bar
+from tqdm import tqdm
 from numpy import ndarray
 from scipy import ndimage
 from scipy.ndimage import rotate
 from scipy.optimize import curve_fit, minimize
-from scipy.optimize import minimize
 from scipy.interpolate import interp1d
 from scipy.signal import find_peaks
 from scipy.stats import binned_statistic
-from astropy.convolution import Gaussian2DKernel, convolve, convolve_fft
-import celerite
-from celerite import terms
+from astropy.convolution import Gaussian2DKernel, convolve_fft
 from scipy import signal
 
-
-import casa_cube
+from casa_cube import Cube
 
 sigma_to_FWHM = 2.0 * np.sqrt(2.0 * np.log(2))
 FWHM_to_sigma = 1.0 / sigma_to_FWHM
@@ -108,7 +104,7 @@ class Surface:
 
         if isinstance(cube,str):
             print("Reading cube: "+cube)
-            cube = casa_cube.Cube(cube)
+            cube = Cube(cube)
 
         # Truncating the cube is velocity if needed
         if vmin is not None:
@@ -543,10 +539,8 @@ class Surface:
         self.x_star_rot = center[0] + dx * np.cos(angle) + dy * np.sin(angle)
         self.y_star_rot = center[1] - dx * np.sin(angle) + dy * np.cos(angle)
 
-        with alive_bar(int(self.iv_max-self.iv_min), title="Rotating cube") as bar:
-            for iv in range(self.iv_min,self.iv_max):
-                self.cube.image[iv,:,:] = np.array(rotate(self.cube.image[iv,:,:], self.PA - self.inc_sign * 90.0, reshape=False))
-                bar()
+        for iv in tqdm(range(self.iv_min, self.iv_max + 1), desc="Rotating cube"):
+            self.cube.image[iv,:,:] = np.array(rotate(self.cube.image[iv,:,:], self.PA - self.inc_sign * 90.0, reshape=False))
 
         return
 
@@ -650,12 +644,10 @@ class Surface:
         self.I = np.zeros([ns,nv,nx,2])
 
         # Loop over the channels
-        with alive_bar(int(self.iv_max-self.iv_min), title="Extracting isovelocity curves") as bar:
-            for iv in range(self.iv_min,self.iv_max):
-                for iscale in range(self.n_scales):
-                    self._extract_isovelocity_1channel(iv,iscale)
-                    #self._refine_isovelocity_1channel(iv,iscale=iscale)
-                    bar()
+        for iv in tqdm(range(self.iv_min, self.iv_max + 1), desc="Extracting isovelocity curves"):
+            for iscale in range(self.n_scales):
+                self._extract_isovelocity_1channel(iv,iscale)
+                #self._refine_isovelocity_1channel(iv,iscale=iscale)
 
         #--  Additional spectral filtering to clean the data ??
 
@@ -708,11 +700,9 @@ class Surface:
                 self.multiscale_std[iscale] = np.nanstd([im,im1])
 
                 # Make the multiscale cube
-                with alive_bar(int(self.iv_max-self.iv_min), title="Making multi-scale cube: scale #"+str(iscale)) as bar:
-                    for iv in range(self.iv_min,self.iv_max):
-                        im = self.rotated_images[0,iv-self.iv_min,:,:]
-                        self.rotated_images[iscale,iv-self.iv_min,:,:] = convolve_fft(im, beam)
-                        bar()
+                for iv in tqdm(range(self.iv_min, self.iv_max + 1), desc=f"Making multi-scale cube: scale #{iscale}"):
+                    im = self.rotated_images[0,iv-self.iv_min,:,:]
+                    self.rotated_images[iscale,iv-self.iv_min,:,:] = convolve_fft(im, beam)
 
                 self.multiscale_bmaj[iscale] = bmaj
                 self.multiscale_bmin[iscale] = bmin
@@ -1099,7 +1089,7 @@ class Surface:
             metric[i] = self.h_std
 
         plt.plot(inc_array,metric, color="red", markersize=1)
-        plt.xlabel("Inclination ($^\mathrm{o}$)")
+        plt.xlabel(r"Inclination ($^\mathrm{o}$)")
         plt.ylabel("altitude dispersion")
 
         # T dispersion
@@ -1116,7 +1106,7 @@ class Surface:
             metric[i] = self.T_std
 
         plt.plot(inc_array,metric, color="red", markersize=1)
-        plt.xlabel("Inclination ($^\mathrm{o}$)")
+        plt.xlabel(r"Inclination ($^\mathrm{o}$)")
         plt.ylabel("T dispersion")
 
         # Velocity dispersion
@@ -1145,7 +1135,7 @@ class Surface:
             metric[i] = self.v_std
 
         plt.plot(inc_array,metric, color="blue", markersize=1)
-        plt.xlabel("Inclination ($^\mathrm{o}$)")
+        plt.xlabel(r"Inclination ($^\mathrm{o}$)")
         plt.ylabel("Velocity dispersion")
         self.inc = inc_array[np.nanargmin(metric)]
         print("Best fit for inclination =", self.inc, "deg")
@@ -1382,7 +1372,7 @@ class Surface:
         #    im = np.array(rotate(im, self.PA - self.inc_sign * 90.0, reshape=False))
 
         ax.imshow(im, origin="lower", cmap='binary_r')
-        ax.set_title(r'v='+"{:.2f}".format(cube.velocity[iv])+' , $\Delta$v='+"{:.2f}".format(cube.velocity[iv] - self.v_syst)+' , id:'+str(iv), color='k')
+        ax.set_title(r'v='+"{:.2f}".format(cube.velocity[iv])+r' , $\Delta$v='+"{:.2f}".format(cube.velocity[iv] - self.v_syst)+' , id:'+str(iv), color='k')
 
         if n_surf[iscale,iv]:
             ax.plot(x[iscale,iv,:n_surf[iscale,iv]],y[iscale,iv,:n_surf[iscale,iv],0],"o",color="red",markersize=1)
@@ -1768,6 +1758,8 @@ class Surface:
 
 
     def fit_surface_height_gp(self):
+        import celerite2
+        from celerite2 import terms
 
         x = np.array(self.r.ravel().compressed())
         y = self.h.ravel().compressed()
@@ -1778,13 +1770,16 @@ class Surface:
         y=y[order]
         yerr=yerr[order]
 
-        # Set up the GP model
-        k0 = terms.JitterTerm(log_sigma=np.log(np.var(y)))
-        k1 = terms.RealTerm(log_a=np.log(np.var(y)), log_c=np.log(50))
-        k2 = terms.RealTerm(log_a=np.log(np.var(y)), log_c=np.log(5))
-        kernel = k0+k1+k2
-        kernel = k0+k2
-        gp = celerite.GP(kernel, fit_mean=False)
+        # set up the GP model
+        # in celerite2, we use GaussianProcess with a mean function
+        # the JitterTerm and RealTerm are replaced with appropriate terms
+        sigma = np.sqrt(np.var(y))
+        k0 = terms.SHOTerm(sigma=sigma, rho=1.0, Q=1/np.sqrt(2))
+        k1 = terms.SHOTerm(sigma=sigma, rho=50.0, Q=1/np.sqrt(2))
+        k2 = terms.SHOTerm(sigma=sigma, rho=5.0, Q=1/np.sqrt(2))
+        kernel = k0 + k1 + k2
+        kernel = k0 + k2
+        gp = celerite2.GaussianProcess(kernel, mean=0.0)
 
         # Define a cost function
         def neg_log_like(params, y, gp):
@@ -1795,7 +1790,7 @@ class Surface:
             gp.set_parameter_vector(params)
             return -gp.grad_log_likelihood(y)[1]
 
-        gp.compute(x, yerr)
+        gp.compute(x, yerr=yerr)
 
         initial_params = gp.get_parameter_vector()
         bounds = gp.get_parameter_bounds()
@@ -1807,7 +1802,7 @@ class Surface:
         # Make the maximum likelihood prediction
         t = np.linspace(np.min(x), np.max(x), 500)
 
-        mu, var = gp.predict(y, t, return_var=True)
+        mu, var = gp.predict(y, t=t, return_var=True)
         std = np.sqrt(var)
 
         return t, mu, std
