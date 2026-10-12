@@ -58,6 +58,9 @@ class Surface:
                  iv_max: int = None,
                  no_scales: bool = False,
                  scales = None,
+                 merge_scales: bool = True,
+                 merge_sep_min: float = 1.5,
+                 merge_tol: float = 0.5,
                  only_guess: bool = False,
                  **kwargs):
         """
@@ -89,6 +92,15 @@ class Surface:
             Whether to display the traces and extracted height, velocity and temperature plots
         std
             Standard deviation per channel. If None, it is calculated with numpy
+        merge_scales
+            Merge the extractions at the different scales into a single one, keeping the finest valid scale
+            at each position. If False, the extractions at all scales are kept and pooled. Default is True
+        merge_sep_min
+            Minimum separation between near and far sides, in units of the beam major axis at that scale,
+            for a point to be considered resolved when merging scales. Default is 1.5
+        merge_tol
+            Maximum deviation from the next coarser scale, in units of the coarser beam major axis,
+            for a point to be kept when merging scales. Default is 0.5
 
         Returns
         -------
@@ -195,6 +207,9 @@ class Surface:
         self._make_multiscale_cube()
 
         self._extract_isovelocity()
+
+        if merge_scales and self.n_scales > 1:
+            self._merge_scales(sep_min=merge_sep_min, tol=merge_tol)
 
         # Making plots
         if plot:
@@ -865,6 +880,86 @@ class Surface:
         return
 
 
+    def _merge_scales(self, sep_min=1.5, tol=0.5, snr_min=None):
+        """
+        Merge the isovelocity curves extracted at the different scales into a single extraction.
+
+        At each channel and x position, we keep the point from the finest scale that:
+        - resolves the near and far sides: separation > sep_min * bmaj at that scale,
+        - is consistent with the next coarser scale (if it has a point): deviation < tol * coarser bmaj,
+        - has snr > snr_min on both sides (optional, the extraction already applies sigma * std).
+
+        The per-scale extractions are saved in x_sky_scales, y_sky_scales, n_surf_scales,
+        Tb_scales, I_scales and snr_scales. x_sky, y_sky, n_surf, Tb, I and snr are replaced by the
+        merged extraction (with a single scale) and scale_id gives the scale used for each point.
+        """
+
+        ns, nv, nx = self.x_sky.shape
+        pix = self.cube.pixelscale
+
+        Y = np.full((ns,nv,nx,2), np.nan)
+        I = np.full((ns,nv,nx,2), np.nan)
+        T = np.full((ns,nv,nx,2), np.nan)
+
+        # Regrid each scale on the x pixel grid
+        for s in range(ns):
+            for iv in range(nv):
+                n = self.n_surf[s,iv]
+                if n:
+                    xi = self.x_sky[s,iv,:n].astype(int)
+                    Y[s,iv,xi,:] = self.y_sky[s,iv,:n,:]
+                    I[s,iv,xi,:] = self.I[s,iv,:n,:]
+                    T[s,iv,xi,:] = self.Tb[s,iv,:n,:]
+
+        scale_id = np.full((nv,nx), -1, dtype=int)
+        with np.errstate(invalid="ignore"):
+            for s in range(ns): # from fine to coarse
+                ok = (Y[s,:,:,1] - Y[s,:,:,0]) > sep_min * self.multiscale_bmaj[s] / pix
+                if snr_min is not None:
+                    ok &= np.min(I[s,:,:,:], axis=-1) / self.multiscale_std[s] > snr_min
+                if s < ns-1:
+                    dev = np.max(np.abs(Y[s,:,:,:] - Y[s+1,:,:,:]), axis=-1)
+                    ok &= np.isnan(dev) | (dev < tol * self.multiscale_bmaj[s+1] / pix)
+                scale_id[ok & (scale_id < 0)] = s
+
+        # Keep the per-scale extractions
+        self.x_sky_scales = self.x_sky
+        self.y_sky_scales = self.y_sky
+        self.n_surf_scales = self.n_surf
+        self.Tb_scales = self.Tb
+        self.I_scales = self.I
+        self.snr_scales = self.snr
+
+        # Pack the merged extraction in the same format, with a single scale
+        self.n_surf = np.zeros([1,nv], dtype=int)
+        self.x_sky = np.zeros([1,nv,nx])
+        self.y_sky = np.zeros([1,nv,nx,2])
+        self.Tb = np.zeros([1,nv,nx,2])
+        self.I = np.zeros([1,nv,nx,2])
+        self.snr = np.zeros([1,nv,nx,2])
+        self.scale_id = np.full([1,nv,nx], -1, dtype=int)
+
+        for iv in range(nv):
+            xi = np.where(scale_id[iv,:] >= 0)[0]
+            n = xi.size
+            self.n_surf[0,iv] = n
+            if n:
+                s = scale_id[iv,xi]
+                self.x_sky[0,iv,:n] = xi
+                self.y_sky[0,iv,:n,:] = Y[s,iv,xi,:]
+                self.Tb[0,iv,:n,:] = T[s,iv,xi,:]
+                self.I[0,iv,:n,:] = I[s,iv,xi,:]
+                self.snr[0,iv,:n,:] = I[s,iv,xi,:] / self.multiscale_std[s,np.newaxis]
+                self.scale_id[0,iv,:n] = s
+
+        n_total = np.sum(self.n_surf_scales[0,:])
+        n_merged = np.sum(self.n_surf)
+        print("Merged scales:", n_merged, "points (", n_total, "at native resolution)")
+        print("Points per scale:", np.bincount(scale_id[scale_id >= 0], minlength=ns))
+
+        return
+
+
     def _refine_isovelocity_1channel(self,iv,iscale=0):
         # Find iteratively the maxima along the perpendicular to the isovelocity curve
         # then remap on the initial regular x_spacing so we can compute the altitude
@@ -1330,7 +1425,13 @@ class Surface:
 
         return
 
-    def plot_channel(self, iv, iscale=0, radius=3.0, ax=None, clear=True):
+    def _per_scale_extraction(self):
+        # Per-scale extractions are moved to *_scales when the scales are merged
+        if hasattr(self, "x_sky_scales"):
+            return self.x_sky_scales, self.y_sky_scales, self.n_surf_scales
+        return self.x_sky, self.y_sky, self.n_surf
+
+    def plot_channel(self, iv, iscale=None, radius=3.0, ax=None, clear=True):
         """Plot a single velocity channel with detected emission surfaces.
 
         This method creates a visualization of a single velocity channel showing:
@@ -1344,7 +1445,8 @@ class Surface:
         iv : int
             Velocity channel number to plot
         iscale : int, optional
-            Scale index to use for plotting (default: 0)
+            Scale index to use for plotting. If None (default), plots the merged extraction
+            (or the native scale if scales were not merged) on the native image
         radius : float, optional
             Radius in arcseconds for zooming (default: 3.0)
         ax : matplotlib.axes.Axes, optional
@@ -1372,9 +1474,11 @@ class Surface:
             ax.cla()
 
         cube = self.cube
-        x = self.x_sky
-        y = self.y_sky
-        n_surf = self.n_surf
+        if iscale is None:
+            x, y, n_surf = self.x_sky, self.y_sky, self.n_surf
+            iscale = 0
+        else:
+            x, y, n_surf = self._per_scale_extraction()
 
         im = np.nan_to_num(self.rotated_images[iscale,iv-self.iv_min,:,:]) # array has been trimmed in velocity
         # Array is rotated already
@@ -1438,9 +1542,7 @@ class Surface:
             ax.cla()
 
         cube = self.cube
-        x = self.x_sky
-        y = self.y_sky
-        n_surf = self.n_surf
+        x, y, n_surf = self._per_scale_extraction()
 
         iscale=0
         im = np.nan_to_num(self.rotated_images[iscale,iv-self.iv_min,:,:])
@@ -1465,9 +1567,7 @@ class Surface:
         fig, axs = plt.subplots(ncols=ncols, nrows=2, figsize=(2*ncols+1, 5),constrained_layout=True,num=num,
                                 clear=False, sharex=True, sharey=True)
         cube = self.cube
-        x = self.x_sky
-        y = self.y_sky
-        n_surf = self.n_surf
+        x, y, n_surf = self._per_scale_extraction()
 
         iscale=0
         im = np.nan_to_num(self.rotated_images[iscale,iv-self.iv_min,:,:])
@@ -1495,7 +1595,7 @@ class Surface:
 
         return
 
-    def plot_channels(self,n=20, num=21, radius=1.0, iv_min=None, iv_max=None, save=False, iscale=0):
+    def plot_channels(self,n=20, num=21, radius=1.0, iv_min=None, iv_max=None, save=False, iscale=None):
         """Create a grid of plots showing multiple velocity channels.
 
         This method creates a grid of plots showing the emission and detected surfaces
@@ -1516,7 +1616,7 @@ class Surface:
         save : bool or str, optional
             If True or string, saves the plot. If string, uses as filename
         iscale : int, optional
-            Scale index to use for plotting (default: 0)
+            Scale index to use for plotting. If None (default), plots the merged extraction
 
         Returns
         -------
