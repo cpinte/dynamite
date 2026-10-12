@@ -186,8 +186,8 @@ class Surface:
             if scales is None:
                 self._select_scales(num=num)
             else:
-                self.scales = scales
-                self.n_scales = len([scales])
+                self.scales = np.atleast_1d(scales)
+                self.n_scales = self.scales.size
         print("Using ", self.n_scales, " scales")
         print("Scales are ", self.scales, " arcsec")
 
@@ -665,7 +665,7 @@ class Surface:
         self.iv_max_surf = np.max(ou)
         print("Surfaces detected between channels", self.iv_min_surf, "and", self.iv_max_surf)
 
-        self.snr = self.I/self.cube.std
+        self.snr = self.I/self.multiscale_std[:,np.newaxis,np.newaxis,np.newaxis]
 
         return
 
@@ -807,14 +807,14 @@ class Surface:
 
                         # Saving the coordinates
                         j_surf_exact[i,k] = y_max
-                        I_surf[i,k] = im[j,i] = f_max
+                        I_surf[i,k] = f_max
                 else:
                     for k in range(2):
                         j = j_surf[i,k]
                         j_surf_exact[i,k] = j
                         I_surf[i,k] = im[j,i]
 
-                T_surf[i,k] = self.cube._Jybeam_to_Tb(I_surf[i,k]) # Converting to Tb (currently assuming the cube is in Jy/beam)
+                T_surf[i,:] = self.cube._Jybeam_to_Tb(I_surf[i,:]) # Converting to Tb (currently assuming the cube is in Jy/beam)
 
         #-- Now we try to clean out a bit the surfaces we have extracted
 
